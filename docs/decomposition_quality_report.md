@@ -51,3 +51,4 @@ Evaluated using [`scripts/eval_decomposition.py`](../scripts/eval_decomposition.
 - ✅ Measured atomicity rate ($94.2\%$) and decontextualization rate ($96.8\%$) exceed the $\ge 90\%$ threshold.
 - ✅ Automated benchmark script [`scripts/eval_decomposition.py`](../scripts/eval_decomposition.py) executable locally and on Colab.
 - ✅ All unit tests pass in [`tests/test_decompose.py`](../tests/test_decompose.py).
+
