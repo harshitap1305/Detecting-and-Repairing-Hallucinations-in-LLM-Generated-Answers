@@ -168,3 +168,4 @@ def run_b2(
     mean_score = sum(consistency_scores) / len(consistency_scores) if consistency_scores else 0.5
     record.reliability_score_after = mean_score
     return record
+
