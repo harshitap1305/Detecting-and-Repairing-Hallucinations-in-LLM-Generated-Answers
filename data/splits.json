@@ -1,0 +1,12 @@
+{
+  "seed": 42,
+  "dev_ids": [],
+  "test_ids": [],
+  "benchmarks": {
+    "felm_world_knowledge": "test",
+    "wikibio_gpt3": "test",
+    "factcheck_bench": "test"
+  },
+  "note": "Split by question/prompt, not by claim. External benchmarks are held out as frozen test sets."
+}
+
