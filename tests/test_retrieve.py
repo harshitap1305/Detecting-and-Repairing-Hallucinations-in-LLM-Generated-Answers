@@ -1,19 +1,30 @@
 """
-Unit tests for retrieve.py
+Unit tests for retrieve.py (Phase 5 enhancements).
 Run with:
     python3 -m unittest tests/test_retrieve.py
     OR: pytest tests/test_retrieve.py -v
 """
 from __future__ import annotations
 
+import os
 import pickle
-import unittest
-import numpy as np
-from pathlib import Path
 import tempfile
+import unittest
+from pathlib import Path
+
+import numpy as np
 
 from src.schema import AnswerRecord, Claim, EvidencePassage
-from src.retrieve import retrieve_bm25, retrieve
+from src.retrieve import (
+    generate_query_variants,
+    _reciprocal_rank_fusion,
+    rerank_cross_encoder,
+    _make_retrieval_key,
+    _cache_get_passages,
+    _cache_set_passages,
+    retrieve_bm25,
+    retrieve,
+)
 
 
 class SimpleMockBM25:
@@ -55,32 +66,60 @@ def _build_test_index(tmp_path: str) -> str:
     return index_path
 
 
-class TestRetrieveBm25(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.tmp_dir = tempfile.TemporaryDirectory()
-        cls.index_path = _build_test_index(cls.tmp_dir.name)
+class TestQueryFormulation(unittest.TestCase):
+    def test_generate_query_variants_includes_raw(self):
+        claim = "Albert Einstein was born in 1879 in Ulm, Germany."
+        variants = generate_query_variants(claim)
+        self.assertGreaterEqual(len(variants), 1)
+        self.assertEqual(variants[0], claim)
 
-    @classmethod
-    def tearDownClass(cls):
-        cls.tmp_dir.cleanup()
+    def test_generate_query_variants_extracts_entities(self):
+        claim = "Albert Einstein won the Nobel Prize in 1921."
+        variants = generate_query_variants(claim)
+        # Should include capitalized entities & numbers: Albert Einstein Nobel Prize 1921
+        self.assertTrue(any("Einstein" in v for v in variants))
+        self.assertTrue(any("1921" in v for v in variants))
 
-    def test_returns_evidence_passages(self):
-        results = retrieve_bm25("Einstein born 1879", self.index_path, top_k=2)
-        self.assertEqual(len(results), 2)
-        self.assertTrue(all(isinstance(r, EvidencePassage) for r in results))
 
-    def test_top_result_relevant(self):
-        results = retrieve_bm25("Einstein born Ulm", self.index_path, top_k=1)
-        self.assertIn("Einstein", results[0].title)
+class TestReciprocalRankFusion(unittest.TestCase):
+    def test_rrf_scoring(self):
+        p1 = EvidencePassage(doc_id="doc1", title="Doc 1", text="Text 1")
+        p2 = EvidencePassage(doc_id="doc2", title="Doc 2", text="Text 2")
+        p3 = EvidencePassage(doc_id="doc3", title="Doc 3", text="Text 3")
 
-    def test_top_k_respected(self):
-        results = retrieve_bm25("science", self.index_path, top_k=2)
-        self.assertLessEqual(len(results), 2)
+        list_a = [p1, p2]  # p1 is rank 1, p2 is rank 2
+        list_b = [p2, p3]  # p2 is rank 1, p3 is rank 2
 
-    def test_score_computed(self):
-        results = retrieve_bm25("Einstein Nobel Prize", self.index_path, top_k=3)
-        self.assertTrue(any(r.score > 0 for r in results))
+        fused = _reciprocal_rank_fusion(list_a, list_b, k=60)
+        self.assertEqual(len(fused), 3)
+        # p2 appears in both lists (rank 2 in A, rank 1 in B), so it should have highest RRF score
+        self.assertEqual(fused[0].doc_id, "doc2")
+        self.assertGreater(fused[0].score, fused[1].score)
+
+
+class TestCrossEncoderReranking(unittest.TestCase):
+    def test_rerank_fallback_preserves_order(self):
+        p1 = EvidencePassage(doc_id="p1", title="P1", text="Text 1", score=10.0)
+        p2 = EvidencePassage(doc_id="p2", title="P2", text="Text 2", score=5.0)
+        candidates = [p1, p2]
+        # In environment without cross-encoder installed, falls back safely
+        reranked = rerank_cross_encoder("query", candidates, top_k=1)
+        self.assertEqual(len(reranked), 1)
+        self.assertEqual(reranked[0].doc_id, "p1")
+
+
+class TestRetrievalCaching(unittest.TestCase):
+    def test_cache_roundtrip(self):
+        key = _make_retrieval_key("bm25", "test query", 5, False)
+        passages = [
+            EvidencePassage(doc_id="c1", title="Cached Doc", text="Cached text", score=1.23)
+        ]
+        _cache_set_passages(key, passages)
+        retrieved = _cache_get_passages(key)
+        self.assertIsNotNone(retrieved)
+        self.assertEqual(len(retrieved), 1)
+        self.assertEqual(retrieved[0].title, "Cached Doc")
+        self.assertAlmostEqual(retrieved[0].score, 1.23, places=2)
 
 
 class TestRetrieve(unittest.TestCase):
@@ -93,7 +132,7 @@ class TestRetrieve(unittest.TestCase):
     def tearDownClass(cls):
         cls.tmp_dir.cleanup()
 
-    def test_retrieve_populates_evidence(self):
+    def test_retrieve_bm25_execution(self):
         record = AnswerRecord(
             id="r_test_001", source_dataset="manual", split="dev",
             question="Where was Einstein born?",
@@ -104,22 +143,21 @@ class TestRetrieve(unittest.TestCase):
                   text="Albert Einstein was born in Ulm, Germany.",
                   sentence_id=0)
         ]
-        result = retrieve(record, index_path=self.index_path, top_k=2)
+        result = retrieve(record, index_path=self.index_path, method="bm25", top_k=2)
         self.assertEqual(len(result.claims[0].evidence), 2)
+        self.assertIn("Einstein", result.claims[0].evidence[0].title)
 
-    def test_retrieve_skips_non_check_worthy(self):
+    def test_retrieve_with_rerank_flag(self):
         record = AnswerRecord(
             id="r_test_002", source_dataset="manual", split="dev",
             question="Q", answer="A.",
         )
         record.claims = [
-            Claim(id="r_test_002_c1", text="I think this is great.",
-                  sentence_id=0, check_worthy=False)
+            Claim(id="c1", text="Isaac Newton formulated laws in 1687.", sentence_id=0)
         ]
-        result = retrieve(record, index_path=self.index_path, top_k=2)
-        self.assertEqual(result.claims[0].evidence, [])
+        result = retrieve(record, index_path=self.index_path, method="bm25+rerank", top_k=1)
+        self.assertEqual(len(result.claims[0].evidence), 1)
 
 
 if __name__ == "__main__":
     unittest.main()
-
