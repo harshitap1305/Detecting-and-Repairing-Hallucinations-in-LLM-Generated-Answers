@@ -6,7 +6,7 @@ Usage:
         --results results/pipeline_output.jsonl \
         --gold data/gold/test.jsonl
 
-Phase 8: full metrics with bootstrap CIs. Phase 3: reliability score delta and summary statistics.
+Phase 8: full scientific metrics with bootstrap CIs, SCR progression, preservation, and lexical drift.
 """
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ from pathlib import Path
 # Allow importing src modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from src.evaluate import evaluate_dataset
 from src.schema import AnswerRecord
 
 
@@ -31,55 +32,11 @@ def load_jsonl(path: str) -> list[AnswerRecord]:
     return records
 
 
-def compute_reliability_delta(records: list[AnswerRecord]) -> dict:
-    """Compute mean reliability score before and after repair."""
-    before = [
-        r.reliability_score_before
-        for r in records
-        if r.reliability_score_before is not None
-    ]
-    after = [
-        r.reliability_score_after
-        for r in records
-        if r.reliability_score_after is not None
-    ]
-    if not before:
-        return {"error": "No reliability scores found."}
-    mean_before = sum(before) / len(before)
-    mean_after = sum(after) / len(after) if after else 0.0
-    return {
-        "n_evaluated": len(before),
-        "mean_reliability_before": mean_before,
-        "mean_reliability_after": mean_after,
-        "mean_delta": mean_after - mean_before,
-    }
-
-
-def compute_claim_stats(records: list[AnswerRecord]) -> dict:
-    """Compute summary statistics for claim verdicts."""
-    total_claims = 0
-    check_worthy = 0
-    label_dist = {"Supported": 0, "Contradicted": 0, "Unverifiable": 0, "Unlabeled": 0}
-
-    for rec in records:
-        for c in rec.claims:
-            total_claims += 1
-            if c.check_worthy:
-                check_worthy += 1
-                lbl = c.label if c.label in label_dist else "Unlabeled"
-                label_dist[lbl] += 1
-
-    return {
-        "total_claims": total_claims,
-        "check_worthy_claims": check_worthy,
-        "label_distribution": label_dist,
-    }
-
-
 def main():
     parser = argparse.ArgumentParser(description="Evaluate pipeline results")
     parser.add_argument("--results", required=True, help="Path to pipeline output JSONL")
     parser.add_argument("--gold", default=None, help="Path to gold dataset JSONL (optional)")
+    parser.add_argument("--n_bootstrap", type=int, default=1000, help="Number of bootstrap iterations")
     args = parser.parse_args()
 
     results_path = Path(args.results)
@@ -88,31 +45,49 @@ def main():
         sys.exit(1)
 
     records = load_jsonl(str(results_path))
+    gold_records = load_jsonl(args.gold) if args.gold and Path(args.gold).exists() else None
+
     print(f"\n=======================================================")
-    print(f" Evaluation Report: {len(records)} records analyzed")
+    print(f" Scientific Evaluation Report: {len(records)} records analyzed")
+    if gold_records:
+        print(f" Gold Reference: {len(gold_records)} gold records")
     print(f"=======================================================")
 
-    claim_stats = compute_claim_stats(records)
+    metrics = evaluate_dataset(records, gold_records=gold_records, n_bootstrap=args.n_bootstrap)
+
     print("\nClaim Statistics:")
-    print(f"  Total claims:        {claim_stats['total_claims']}")
-    print(f"  Check-worthy claims: {claim_stats['check_worthy_claims']}")
+    print(f"  Total claims:        {metrics['total_claims']}")
+    print(f"  Check-worthy claims: {metrics['check_worthy_claims']}")
     print(f"  Verdicts:")
-    for lbl, cnt in claim_stats["label_distribution"].items():
-        pct = (cnt / claim_stats["check_worthy_claims"] * 100) if claim_stats["check_worthy_claims"] > 0 else 0
+    for lbl, cnt in metrics["label_distribution"].items():
+        pct = (cnt / metrics["check_worthy_claims"] * 100) if metrics["check_worthy_claims"] > 0 else 0
         print(f"    - {lbl:15s}: {cnt:5d} ({pct:5.1f}%)")
 
-    rel = compute_reliability_delta(records)
-    print("\nReliability Score Progression:")
-    if "error" in rel:
-        print(f"  {rel['error']}")
-    else:
-        print(f"  Answers evaluated:   {rel['n_evaluated']}")
-        print(f"  Mean score BEFORE:   {rel['mean_reliability_before']:.4f}")
-        print(f"  Mean score AFTER:    {rel['mean_reliability_after']:.4f}")
-        print(f"  Mean delta:          {rel['mean_delta']:+.4f}")
+    scr = metrics["scr"]
+    print("\nSupported Claim Ratio (SCR / FActScore) Progression [95% CI]:")
+    print(f"  SCR BEFORE: {scr['before']['mean']:.4f} [{scr['before']['ci_lower']:.4f}, {scr['before']['ci_upper']:.4f}]")
+    print(f"  SCR AFTER:  {scr['after']['mean']:.4f} [{scr['after']['ci_lower']:.4f}, {scr['after']['ci_upper']:.4f}]")
+    print(f"  SCR DELTA:  {scr['delta']['mean']:+.4f} [{scr['delta']['ci_lower']:+.4f}, {scr['delta']['ci_upper']:+.4f}]")
+
+    pres = metrics["preservation_rate"]
+    oe = metrics["over_edit_rate"]
+    print("\nPreservation & Localization Guard Performance [95% CI]:")
+    print(f"  Preservation Rate: {pres['mean'] * 100:.2f}% [{pres['ci_lower'] * 100:.2f}%, {pres['ci_upper'] * 100:.2f}%]")
+    print(f"  Over-edit Rate:    {oe['mean'] * 100:.2f}% [{oe['ci_lower'] * 100:.2f}%, {oe['ci_upper'] * 100:.2f}%]")
+
+    lex = metrics["lexical_similarity"]
+    print("\nLexical & Semantic Drift [95% CI]:")
+    print(f"  ROUGE-L F1:              {lex['rouge_l_f1']['mean']:.4f} [{lex['rouge_l_f1']['ci_lower']:.4f}, {lex['rouge_l_f1']['ci_upper']:.4f}]")
+    print(f"  Levenshtein Similarity:  {lex['levenshtein_similarity']['mean']:.4f} [{lex['levenshtein_similarity']['ci_lower']:.4f}, {lex['levenshtein_similarity']['ci_upper']:.4f}]")
+    print(f"  Word Retention:          {lex['word_retention']['mean']:.4f} [{lex['word_retention']['ci_lower']:.4f}, {lex['word_retention']['ci_upper']:.4f}]")
+
+    if metrics.get("detection_vs_gold"):
+        det = metrics["detection_vs_gold"]
+        print("\nClaim-level Detection vs. Gold:")
+        print(f"  Precision: {det['precision']:.4f} | Recall: {det['recall']:.4f} | F1: {det['f1']:.4f} | Accuracy: {det['accuracy']:.4f}")
+
     print(f"=======================================================\n")
 
 
 if __name__ == "__main__":
     main()
-

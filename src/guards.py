@@ -137,3 +137,4 @@ def validate_repair_guards(
         return False, ground_reason
 
     return True, "All safety guards passed."
+

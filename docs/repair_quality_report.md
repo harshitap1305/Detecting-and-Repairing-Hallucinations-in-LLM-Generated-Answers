@@ -114,3 +114,4 @@ To support rigorous evaluation in Phase 8:
 - ✅ `scripts/eval_agreement.py` computes Cohen's $\kappa$ and confusion matrices.
 - ✅ `docs/annotation_guidelines.md` completed with 10 canonical worked examples.
 - ✅ Unit test suite passes 100% cleanly in [`tests/test_repair.py`](../tests/test_repair.py) (82 tests total across repo).
+
