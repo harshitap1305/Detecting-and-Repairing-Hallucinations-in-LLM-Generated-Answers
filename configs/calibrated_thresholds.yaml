@@ -1,0 +1,5 @@
+# Calibrated Verifier Decision Boundaries (Phase 6 Grid Search)
+# Optimized for 3-way Macro-F1 across Supported, Contradicted, Unverifiable
+tau_s: 0.50  # Entailment threshold for Supported verdict
+tau_c: 0.35  # Contradiction threshold for Contradicted verdict
+macro_f1: 1.0000

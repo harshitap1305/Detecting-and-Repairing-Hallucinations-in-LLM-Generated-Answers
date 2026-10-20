@@ -63,3 +63,4 @@ retriever:
 1. **Recall Target:** `Hybrid (RRF)` at $k=5$ achieves **93.5% Recall@5**, ensuring nearly all verifiable factual claims receive relevant supporting/refuting context.
 2. **Compute & Token Budget:** Restricting $k=5$ keeps the NLI verifier compute to $\le 5$ premise-hypothesis pairs per claim (well within Colab T4 memory and under 1.5 seconds per answer).
 3. **Reproducibility:** Transparent SQLite retrieval cache prevents redundant searches on identical claim strings.
+
