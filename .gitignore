@@ -1,0 +1,34 @@
+# Data and indexes (too large / licenses)
+data/raw/
+data/processed/
+indexes/
+results/*.jsonl
+results/*.pkl
+results/*.npy
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.env
+venv/
+.venv/
+*.egg
+
+# Colab / Jupyter
+.ipynb_checkpoints/
+
+# Caches
+llm_cache.db
+llm_cache.jsonl
+*.db
+
+# IDE
+.vscode/
+.idea/
+
+# Misc
+*.log
+.DS_Store

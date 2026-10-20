@@ -1,0 +1,40 @@
+# Core NLP
+transformers>=4.40
+sentence-transformers>=2.7
+datasets>=2.19
+spacy>=3.7
+
+# Retrieval
+faiss-cpu>=1.8
+rank-bm25>=0.2.2
+
+# LLM APIs
+groq>=0.9.0
+openai>=1.30
+
+# Quantization (Colab local LLM - optional)
+bitsandbytes>=0.43
+accelerate>=0.30
+
+# Evaluation
+scikit-learn>=1.4
+scipy>=1.13
+rouge-score>=0.1.2
+bert-score>=0.3.13
+
+# Utilities
+pandas>=2.2
+numpy>=1.26
+pydantic>=2.7
+omegaconf>=2.3
+tqdm>=4.66
+python-dotenv>=1.0
+
+# Experiment tracking
+wandb>=0.17
+
+# Demo
+gradio>=4.36
+
+# Testing
+pytest>=8.2
