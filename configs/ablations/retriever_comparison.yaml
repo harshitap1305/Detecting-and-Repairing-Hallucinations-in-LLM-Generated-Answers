@@ -1,0 +1,9 @@
+# Ablation: compare BM25 vs dense vs hybrid retriever
+# Run on dev only; keep all other settings identical to default.yaml
+
+defaults:
+  - ../default
+
+retriever:
+  default_method: "bm25"   # change to "dense" or "hybrid" per run
+  top_k: 5

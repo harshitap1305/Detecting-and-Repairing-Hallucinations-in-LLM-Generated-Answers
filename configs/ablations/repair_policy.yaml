@@ -1,0 +1,6 @@
+# Ablation: repair policy variants
+defaults:
+  - ../default
+
+pipeline:
+  repair_policy: "rewrite+hedge"  # change to "rewrite+remove" or "rewrite-only"
