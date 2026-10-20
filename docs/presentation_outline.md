@@ -131,3 +131,4 @@
 
 ### Step 3: Inspect Tab 2 (Evidence Inspector)
 1. Display the table showing Claim ID `c2`, cited article *"Alexander Graham Bell"*, and verbatim passage snippet confirming birth in Edinburgh.
+

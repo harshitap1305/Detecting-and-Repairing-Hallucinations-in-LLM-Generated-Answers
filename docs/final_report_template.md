@@ -178,3 +178,4 @@ We presented an end-to-end evidence-grounded framework for detecting and repairi
 4. Dhuliawala, S., et al. (2023). Chain-of-Verification Reduces Hallucination in Large Language Models. *arXiv:2309.11495*.
 5. Wang, Y., et al. (2023). Factcheck-GPT: Benchmarking and Improving Factual Verification in Large Language Models. *EMNLP 2023*.
 6. Thorne, J., et al. (2018). FEVER: a Large-scale Dataset for Fact Extraction and VERification. *NAACL 2018*.
+
