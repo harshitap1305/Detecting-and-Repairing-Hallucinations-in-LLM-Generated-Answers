@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from src.schema import AnswerRecord, Claim, EvidencePassage
@@ -68,6 +69,30 @@ class TestNliVerification(unittest.TestCase):
         claim = _make_claim_with_evidence()
         result = verify_claim_nli(claim, tau_s=0.70, tau_c=0.50)
         self.assertEqual(result.label, "Contradicted")
+
+    def test_nli_model_receives_premise_hypothesis_pair(self):
+        import torch
+
+        class Tokenizer:
+            def __init__(self):
+                self.pair = None
+
+            def __call__(self, premise, hypothesis, **kwargs):
+                self.pair = (premise, hypothesis)
+                return {"input_ids": torch.tensor([[1]])}
+
+        class Model:
+            config = SimpleNamespace(id2label={0: "contradiction", 1: "entailment", 2: "neutral"})
+
+            def __call__(self, **kwargs):
+                return SimpleNamespace(logits=torch.tensor([[0.0, 4.0, 0.0]]))
+
+        tokenizer = Tokenizer()
+        claim = _make_claim_with_evidence()
+        with patch("src.verify._get_nli_model", return_value=(tokenizer, Model())):
+            result = verify_claim_nli(claim)
+        self.assertEqual(tokenizer.pair, (claim.evidence[0].text, claim.text))
+        self.assertEqual(result.label, "Supported")
 
 
 class TestEnsembleVerification(unittest.TestCase):

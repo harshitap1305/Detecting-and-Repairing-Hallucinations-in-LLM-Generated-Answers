@@ -71,6 +71,7 @@ def aggregate_verdict(
 # ─── Verifier 1: NLI Cross-Encoder ────────────────────────────────────────────
 
 _nli_model = None
+_nli_model_name = None
 _mock_nli_scorer = None  # Hook for unit testing without downloading 400MB models
 
 
@@ -81,18 +82,17 @@ def set_mock_nli_scorer(scorer_fn):
 
 
 def _get_nli_model(model_name: str = "cross-encoder/nli-deberta-v3-small"):
-    global _nli_model
-    if _nli_model is None:
-        try:
-            from transformers import pipeline
-            _nli_model = pipeline(
-                "text-classification",
-                model=model_name,
-                top_k=None,
-                device=-1,
-            )
-        except Exception:
-            _nli_model = None
+    global _nli_model, _nli_model_name
+    if _nli_model is None or _nli_model_name != model_name:
+        import torch
+        from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        model = AutoModelForSequenceClassification.from_pretrained(model_name)
+        model.to("cuda" if torch.cuda.is_available() else "cpu")
+        model.eval()
+        _nli_model = (tokenizer, model)
+        _nli_model_name = model_name
     return _nli_model
 
 
@@ -122,29 +122,32 @@ def verify_claim_nli(
             max_entail = max(max_entail, ent)
             max_contra = max(max_contra, con)
     else:
-        nli = _get_nli_model(model_name)
-        if nli is None:
-            # Fallback if transformers is unavailable: use text overlap heuristic
-            claim_words = set(claim.text.lower().split())
-            best_overlap = max(
-                (len(claim_words & set(ep.text.lower().split())) / max(1, len(claim_words)))
-                for ep in claim.evidence
+        import torch
+
+        tokenizer, nli = _get_nli_model(model_name)
+        label_names = {int(i): label.lower() for i, label in nli.config.id2label.items()}
+        if not any("entail" in name for name in label_names.values()) or not any(
+            "contra" in name for name in label_names.values()
+        ):
+            raise ValueError(f"NLI model {model_name!r} lacks entailment/contradiction labels")
+
+        for ep in claim.evidence:
+            # Encode a pair, matching the NLI model's training input format.
+            features = tokenizer(
+                ep.text, claim.text, truncation=True, max_length=384,
+                return_tensors="pt",
             )
-            max_entail = best_overlap
-            max_contra = 0.0
-        else:
-            for ep in claim.evidence:
-                premise = ep.text[:512]
-                hypothesis = claim.text[:256]
-                preds = nli(f"{premise} [SEP] {hypothesis}")
-                pred_list = preds[0] if isinstance(preds[0], list) else preds
-                for item in pred_list:
-                    lbl = item["label"].lower()
-                    sc = item["score"]
-                    if "entail" in lbl:
-                        max_entail = max(max_entail, sc)
-                    elif "contra" in lbl:
-                        max_contra = max(max_contra, sc)
+            device = getattr(nli, "device", None)
+            if device is not None:
+                features = {name: tensor.to(device) for name, tensor in features.items()}
+            with torch.no_grad():
+                probabilities = torch.softmax(nli(**features).logits[0], dim=-1)
+            for index, probability in enumerate(probabilities.tolist()):
+                name = label_names[index]
+                if "entail" in name:
+                    max_entail = max(max_entail, probability)
+                elif "contra" in name:
+                    max_contra = max(max_contra, probability)
 
     label, rationale = aggregate_verdict(max_entail, max_contra, tau_s=tau_s, tau_c=tau_c)
     claim.label = label
@@ -269,14 +272,40 @@ def verify_claim_ensemble(
     return claim
 
 
+# ─── Fine-tuned verifier (Path A) ────────────────────────────────────────────
+
+def verify_claim_trained(claim: Claim, checkpoint: str) -> Claim:
+    """Verify a claim with a locally saved three-class classifier checkpoint."""
+    if not claim.check_worthy or not claim.evidence:
+        claim.label = "Unverifiable"
+        claim.label_rationale = "No evidence or non-check-worthy claim."
+        return claim
+
+    from src.training.verifier_model import predict_verdict
+
+    label, probabilities = predict_verdict(
+        [f"Title: {passage.title}\n{passage.text}" for passage in claim.evidence],
+        claim.text, checkpoint,
+    )
+    claim.label = label
+    claim.label_rationale = (
+        "Fine-tuned verifier: "
+        f"P(Supported)={probabilities[0]:.3f}, "
+        f"P(Contradicted)={probabilities[1]:.3f}, "
+        f"P(Unverifiable)={probabilities[2]:.3f}"
+    )
+    return claim
+
+
 # ─── Public API ───────────────────────────────────────────────────────────────
 
 def verify(
     record: AnswerRecord,
     model: str = "llama-3.3-70b-versatile",
     provider: str = "groq",
-    verifier: str = "llm",          # "llm" | "nli" | "ensemble"
+    verifier: str = "llm",          # "llm" | "nli" | "ensemble" | "trained"
     nli_model_name: str = "cross-encoder/nli-deberta-v3-small",
+    trained_model_path: Optional[str] = None,
     tau_s: Optional[float] = None,
     tau_c: Optional[float] = None,
 ) -> AnswerRecord:
@@ -305,6 +334,10 @@ def verify(
                 claim, model=model, provider=provider,
                 nli_model_name=nli_model_name, tau_s=tau_s, tau_c=tau_c
             )
+        elif verifier == "trained":
+            if not trained_model_path:
+                raise ValueError("trained_model_path is required for verifier='trained'")
+            verify_claim_trained(claim, checkpoint=trained_model_path)
         else:
             raise ValueError(f"Unknown verifier type: {verifier!r}")
 
