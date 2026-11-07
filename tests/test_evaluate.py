@@ -177,6 +177,20 @@ class TestEvaluationMetrics(unittest.TestCase):
         self.assertTrue(res["is_supported"])
         self.assertAlmostEqual(res["scr_estimate"], 0.95)
 
+    @patch("src.evaluate.llm_call", return_value="not valid JSON")
+    def test_independent_evaluator_rejects_unparseable_response(self, mock_llm):
+        with self.assertRaises(ValueError):
+            evaluate_with_independent_llm(self.sample_record)
+
+    def test_detection_metrics_reject_mismatched_inputs(self):
+        with self.assertRaises(ValueError):
+            compute_detection_metrics(["Supported"], [])
+
+    def test_scr_before_uses_saved_initial_score_after_reverification(self):
+        # Pipeline re-verification can replace record.claims with final claims.
+        self.sample_record.reliability_score_before = 0.25
+        self.assertAlmostEqual(compute_scr(self.sample_record), 0.25)
+
 
 if __name__ == "__main__":
     unittest.main()

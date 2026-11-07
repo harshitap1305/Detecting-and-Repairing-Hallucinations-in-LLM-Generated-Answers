@@ -1,5 +1,11 @@
 # Phase 8 Deliverable: Comprehensive Scientific Evaluation Report
 
+> **Reproducibility status (7 November 2026):** The numerical results below are
+> not verifiable from artifacts tracked in this repository. Gold annotations,
+> per-record predictions, and populated split IDs are absent. Treat these values
+> as unverified until the inputs and outputs are supplied and rerun. See
+> [baseline status](baseline_status.md).
+
 ## 1. Executive Summary & Experimental Methodology
 
 The objective of Phase 8 is to perform the end-to-end scientific evaluation of the hallucination detection and repair pipeline, benchmarking against **eight comparative baselines (B0–B7)**, answering **Research Questions RQ1–RQ4**, and verifying statistical significance with 1,000 bootstrap resamples and paired Wilcoxon signed-rank tests.

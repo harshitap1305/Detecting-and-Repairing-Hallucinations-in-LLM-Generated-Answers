@@ -1,8 +1,12 @@
 # Detecting and Repairing Hallucinations in LLM-Generated Answers: An Evidence-Grounded, Guarded Localization Framework
 
+> **Draft results:** The benchmark numbers in this template have not been
+> reproduced from tracked experiment artifacts. Replace them with results from
+> held-out runs before submission. See [baseline status](baseline_status.md).
+
 **Authors:** NLP Course Project Team  
 **Institution:** Department of Computer Science & Engineering  
-**Code Repository:** [GitHub Repository](https://github.com/harshita-patidar/Detecting-and-Repairing-Hallucinations-in-LLM-Generated-Answers)  
+**Code Repository:** [GitHub Repository](https://github.com/harshitap1305/Detecting-and-Repairing-Hallucinations-in-LLM-Generated-Answers)
 
 ---
 

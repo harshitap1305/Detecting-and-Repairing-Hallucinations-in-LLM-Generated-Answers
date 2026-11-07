@@ -45,7 +45,9 @@ def main():
         sys.exit(1)
 
     records = load_jsonl(str(results_path))
-    gold_records = load_jsonl(args.gold) if args.gold and Path(args.gold).exists() else None
+    if args.gold and not Path(args.gold).exists():
+        parser.error(f"Gold file does not exist: {args.gold}")
+    gold_records = load_jsonl(args.gold) if args.gold else None
 
     print(f"\n=======================================================")
     print(f" Scientific Evaluation Report: {len(records)} records analyzed")

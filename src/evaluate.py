@@ -125,6 +125,8 @@ def compute_detection_metrics(
     """
     if positive_labels is None:
         positive_labels = ["Contradicted", "Unverifiable"]
+    if len(predictions) != len(ground_truth):
+        raise ValueError("Predictions and ground truth must have the same length.")
 
     tp = fp = fn = tn = 0
     for pred, gold in zip(predictions, ground_truth):
@@ -166,6 +168,8 @@ def compute_scr(record: AnswerRecord, use_after: bool = False) -> float:
     """
     if use_after and record.reliability_score_after is not None:
         return float(record.reliability_score_after)
+    if not use_after and record.reliability_score_before is not None:
+        return float(record.reliability_score_before)
 
     cw = record.check_worthy_claims
     if not cw:
@@ -185,7 +189,8 @@ def compute_preservation_rate(
     Preservation Rate:
     (# originally Supported claims still entailed in repaired answer) / (Total originally Supported claims)
     """
-    target_answer = repaired_answer or record.repaired_answer or record.answer
+    target_answer = (repaired_answer if repaired_answer is not None else
+                     record.repaired_answer if record.repaired_answer is not None else record.answer)
     orig_supported_claims = [c for c in record.claims if c.check_worthy and c.label == "Supported"]
 
     if not orig_supported_claims:
@@ -333,7 +338,7 @@ def evaluate_with_independent_llm(
     """
     Score repaired answer using an independent model (LLM-B) to avoid circular evaluation.
     """
-    target_answer = record.repaired_answer or record.answer
+    target_answer = record.repaired_answer if record.repaired_answer is not None else record.answer
     if passages is None:
         passages = [
             f"(Title: {e.title}) {e.text}"
@@ -357,18 +362,21 @@ def evaluate_with_independent_llm(
 
     import re
     match = re.search(r"\{.*\}", response, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group())
-        except Exception:
-            pass
-
-    return {
-        "is_supported": True,
-        "scr_estimate": record.reliability_score_after or 0.85,
-        "hallucinated_phrases": [],
-        "critique": "Evaluator parse fallback",
-    }
+    if not match:
+        raise ValueError("Independent evaluator did not return a JSON object.")
+    try:
+        result = json.loads(match.group())
+    except json.JSONDecodeError as exc:
+        raise ValueError("Independent evaluator returned malformed JSON.") from exc
+    if (
+        not isinstance(result, dict)
+        or not isinstance(result.get("is_supported"), bool)
+        or type(result.get("scr_estimate")) not in (int, float)
+        or not 0.0 <= result["scr_estimate"] <= 1.0
+        or not isinstance(result.get("hallucinated_phrases"), list)
+    ):
+        raise ValueError("Independent evaluator returned invalid score fields.")
+    return result
 
 
 # ─── 7. Full Benchmark Evaluation Suite ──────────────────────────────────────
@@ -406,7 +414,7 @@ def evaluate_dataset(
     lev_sims = []
     word_retentions = []
     for r in records:
-        repaired = r.repaired_answer or r.answer
+        repaired = r.repaired_answer if r.repaired_answer is not None else r.answer
         rf = compute_rouge_l(repaired, r.answer)["f1"]
         lev = compute_normalized_levenshtein_similarity(repaired, r.answer)
         ret = compute_word_retention(repaired, r.answer)
