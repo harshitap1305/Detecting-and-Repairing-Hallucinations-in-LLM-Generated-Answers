@@ -2,6 +2,17 @@
 
 > **NLP Course Project** — claim-level hallucination detection and evidence-grounded repair.
 
+## Current status
+
+The prompted pipeline and its tests are in the repository. This checkout does
+not include the human gold dev/test annotations, populated split IDs, per-record
+baseline outputs, or trained model checkpoints needed to reproduce the numbers
+in the existing reports. Those numbers are **unverified from the tracked
+artifacts**; see [the baseline audit](docs/baseline_status.md) and run
+`python scripts/audit_baseline.py` to check the available files. The A+C
+training and comparison code below is ready to run, but no trained-model score
+is claimed until data, checkpoints, and held-out outputs are supplied.
+
 ## Pipeline
 
 ```
@@ -43,7 +54,9 @@ export GROQ_API_KEY="your_key_here"
 echo "GROQ_API_KEY=your_key_here" > .env
 ```
 
-### 3. Run the pipeline on a single example (no index needed)
+### 3. Run the pipeline on a single example
+
+Build the FEVER BM25 index in step 6 first, then run this example.
 
 ```python
 from src.schema import AnswerRecord
@@ -113,10 +126,13 @@ run_pipeline_batch(records, output_path='results/phase3_pilot.jsonl',
 project/
 ├── README.md
 ├── requirements.txt
+├── requirements-training.txt ← additional A+C training dependencies
 ├── .env                    ← GROQ_API_KEY (not committed)
 ├── docs/
 │   ├── spec.md             ← task definitions, label schema
-│   └── literature_notes.md
+│   ├── literature_notes.md
+│   ├── baseline_status.md  ← evidence audit of reported results
+│   └── training_workflow.md ← A+C training and evaluation steps
 ├── configs/
 │   ├── default.yaml        ← all model/threshold/policy settings
 │   └── ablations/
@@ -134,15 +150,23 @@ project/
 │   ├── repair.py           ← Stage 4: answer repair
 │   ├── pipeline.py         ← end-to-end orchestration
 │   ├── evaluate.py         ← metrics (Phase 8)
+│   ├── training/           ← FEVER verifier and repair model code
 │   └── baselines/          ← B0–B7 baseline implementations
 ├── scripts/
 │   ├── download_data.py    ← fetch & convert all datasets
 │   ├── build_index.py      ← build BM25 + FAISS indexes
+│   ├── prepare_fever_verifier.py ← prepare Path A training data
+│   ├── build_repair_data.py ← prepare Path C training data
+│   ├── train_verifier.py / train_repair.py
+│   ├── eval_verifier.py / eval_repair.py
+│   ├── compare_training_paths.py ← paired held-out A/C comparison
+│   ├── audit_baseline.py   ← check minimum baseline artifacts
 │   └── run_eval.py         ← compute metrics on pipeline output
 ├── notebooks/
 │   ├── 01_download_data.ipynb   ← Colab: download datasets
 │   ├── 02_build_index.ipynb     ← Colab: build indexes
-│   └── 03_run_pipeline.ipynb    ← Colab: run & evaluate pipeline
+│   ├── 03_run_pipeline.ipynb    ← Colab: run & evaluate pipeline
+│   └── 04_train_A_C_colab.ipynb ← Colab: train A+C and save artifacts
 ├── results/
 ├── demo/
 │   └── app.py              ← Gradio demo (Phase 9)
@@ -161,18 +185,42 @@ project/
 
 1. Mount Google Drive and set `DRIVE_BASE = "/content/drive/MyDrive/hallucination_project"`
 2. Set `LLM_CACHE_PATH` to a Drive path so the cache survives disconnects
-3. Run notebooks in order: `01` → `02` → `03`
+3. Run the baseline notebooks in order: `01` → `02` → `03`. Use `04` for the
+   A+C model training workflow.
 4. All indexes, processed data, and LLM cache live on Drive
 
 ```python
-# Add at the top of every Colab notebook:
+# Mount Drive for runs that save data, caches, or checkpoints:
 import os
 from google.colab import drive
 drive.mount('/content/drive')
 DRIVE_BASE = "/content/drive/MyDrive/hallucination_project"
-os.environ["GROQ_API_KEY"] = "your_key"
 os.environ["LLM_CACHE_PATH"] = f"{DRIVE_BASE}/llm_cache.db"
 ```
+
+For LLM pipeline or comparison cells, add `GROQ_API_KEY` to Colab Secrets and
+read it with `from google.colab import userdata` and
+`os.environ["GROQ_API_KEY"] = userdata.get("GROQ_API_KEY")`. Training the
+verifier and repair model from prepared data does not need that API key.
+
+## A+C model training
+
+Path **A** fine-tunes a three-way FEVER evidence verifier. Path **C** trains a
+Flan-T5 repair editor on verified synthetic corruptions and their source
+sentences. Install `requirements-training.txt` in a GPU Colab runtime and follow
+[the full workflow](docs/training_workflow.md) or
+[the Colab notebook](notebooks/04_train_A_C_colab.ipynb). The workflow prepares
+article-disjoint splits, saves data and checkpoints to Drive, and records exact
+run inputs and package versions.
+
+The pipeline accepts `verifier="trained"` with
+`trained_verifier_checkpoint=...`, and `repair_backend="trained"` with
+`trained_repair_checkpoint=...`. For a valid contribution claim, evaluate four
+variants on the *same* held-out gold test records using
+`scripts/compare_training_paths.py`: prompted baseline, A only, C only, and
+A+C. Its required gold files and trained checkpoints are not included in this
+checkout. Keep the test set separate from model selection and report measured
+results only after that run completes.
 
 ---
 
@@ -200,7 +248,7 @@ All settings live in [`configs/default.yaml`](configs/default.yaml). Key knobs:
 | FELM world-knowledge | Segment-level detection | test only |
 | WikiBio GPT-3 | Sentence-level detection | test only |
 | Factcheck-Bench | Claim-level detection + repair gold | test only |
-| FEVER wiki-pages | Retrieval corpus (Tier A) | — |
+| FEVER claims + wiki-pages | Path A verifier training and Tier A retrieval | article-disjoint train/dev/eval |
 | Wikipedia 20231101.en | Retrieval corpus (Tier B, Phase 5+) | — |
 
 ---
