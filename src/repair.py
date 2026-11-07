@@ -19,7 +19,7 @@ Public API:
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from src.schema import AnswerRecord, Claim, EvidencePassage
 import src.llm as llm
@@ -116,10 +116,10 @@ def _collect_sentence_evidence(claims: List[Claim]) -> List[EvidencePassage]:
     return collected
 
 
-def _apply_fallback_policy(sentence: str, policy: str) -> str:
+def _apply_fallback_policy(sentence: str, policy: str, preserve_supported: bool = False) -> str:
     """Apply configured fallback when repair cannot be grounded or verified."""
     if policy == "rewrite+remove":
-        return ""  # Sentence deleted
+        return sentence if preserve_supported else ""
     if policy == "rewrite+hedge":
         # Prepend epistemic hedge if not already hedged
         if not re.match(r'^(reportedly|according to|it is claimed|allegedly)', sentence.lower()):
@@ -137,6 +137,8 @@ def repair(
     provider: str = "groq",
     policy: str = "rewrite+hedge",
     max_retries: int = 1,
+    backend: str = "prompted",
+    trained_model_path: Optional[str] = None,
 ) -> AnswerRecord:
     """
     Repair flagged sentences in AnswerRecord using evidence-grounded minimal edits with safety guards.
@@ -147,7 +149,14 @@ def repair(
         provider:     LLM provider ("groq" | "openai" | "local").
         policy:       "rewrite+hedge" | "rewrite+remove" | "rewrite-only".
         max_retries:  Maximum retries per sentence on guard rejection.
+        backend:      "prompted" or "trained" (Path C checkpoint).
+        trained_model_path: Local checkpoint directory for the trained backend.
     """
+    if backend not in ("prompted", "trained"):
+        raise ValueError(f"Unknown repair backend: {backend!r}")
+    if backend == "trained" and not trained_model_path:
+        raise ValueError("trained_model_path is required for backend='trained'")
+
     sentences = split_sentences(record.answer)
     flagged_by_sid, supported_by_sid = _group_claims_by_sentence(record)
 
@@ -173,25 +182,42 @@ def repair(
         rejection_reason = None
 
         # 2. Attempt repair with guard validation loop
-        for attempt in range(max_retries + 1):
-            prompt = _build_repair_prompt(
-                sentence=sentence,
-                flagged_claims=flagged_here,
-                supported_claims=supported_here,
-                evidence_passages=evidence_here,
-                policy=policy,
-                rejection_feedback=rejection_reason,
-            )
-            # Use temperature 0 on first attempt, slightly higher on retry
-            temp = 0.0 if attempt == 0 else 0.2
-            candidate = llm.call(
-                prompt=prompt, model=model, provider=provider, temperature=temp
-            ).strip()
+        # The local model is deterministic; retrying the same input cannot improve
+        # a rejected edit. Keep the same guards and fallback as prompted repair.
+        attempts = max_retries + 1 if backend == "prompted" else 1
+        for attempt in range(attempts):
+            if backend == "trained":
+                from src.training.repair_model import generate_edit
 
-            # Handle explicit deletion signal
+                candidate = generate_edit(
+                    sentence, flagged_here, evidence_here,
+                    checkpoint=trained_model_path, policy=policy,
+                ).strip()
+            else:
+                prompt = _build_repair_prompt(
+                    sentence=sentence,
+                    flagged_claims=flagged_here,
+                    supported_claims=supported_here,
+                    evidence_passages=evidence_here,
+                    policy=policy,
+                    rejection_feedback=rejection_reason,
+                )
+                # Use temperature 0 on first attempt, slightly higher on retry
+                temp = 0.0 if attempt == 0 else 0.2
+                candidate = llm.call(
+                    prompt=prompt, model=model, provider=provider, temperature=temp
+                ).strip()
+
+            # Deletion is only allowed by policy and when no supported claim in
+            # the sentence would be lost.
             if candidate.upper() == "REMOVE" or not candidate:
-                accepted_edit = ""
-                break
+                if policy == "rewrite+remove" and not supported_here:
+                    accepted_edit = ""
+                    break
+                rejection_reason = "Deletion would violate the repair policy or remove supported claims."
+                if attempt == attempts - 1:
+                    accepted_edit = _apply_fallback_policy(sentence, policy, bool(supported_here))
+                continue
 
             # Strip accidental quotes
             if (candidate.startswith('"') and candidate.endswith('"')) or (candidate.startswith("'") and candidate.endswith("'")):
@@ -210,9 +236,9 @@ def repair(
                 break
             else:
                 rejection_reason = reason
-                if attempt == max_retries:
+                if attempt == attempts - 1:
                     # All retries exhausted: apply fallback policy
-                    accepted_edit = _apply_fallback_policy(sentence, policy)
+                    accepted_edit = _apply_fallback_policy(sentence, policy, bool(supported_here))
 
         if accepted_edit:
             repaired_sentences.append(accepted_edit)
