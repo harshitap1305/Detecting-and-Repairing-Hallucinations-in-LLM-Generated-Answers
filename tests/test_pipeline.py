@@ -141,6 +141,92 @@ class TestPipeline(unittest.TestCase):
         self.assertEqual(len(results), 1)
         self.assertTrue(out_path.exists())
 
+    def test_second_repair_uses_revised_answer_and_preserves_initial_claims(self):
+        record = AnswerRecord(
+            id="loop", source_dataset="manual", question="Q", answer="Original."
+        )
+        repaired_inputs = []
+
+        def fake_decompose(candidate, **kwargs):
+            candidate.claims = [Claim(
+                id=f"{candidate.id}_c0", text=candidate.answer,
+                sentence_id=0,
+            )]
+            return candidate
+
+        def fake_verify(candidate, **kwargs):
+            supported = candidate.answer == "Second revised."
+            candidate.claims[0].label = "Supported" if supported else "Contradicted"
+            candidate.reliability_score_before = float(supported)
+            return candidate
+
+        def fake_repair(candidate, **kwargs):
+            repaired_inputs.append(candidate.answer)
+            candidate.repaired_answer = (
+                "First revised." if candidate.answer == "Original." else "Second revised."
+            )
+            return candidate
+
+        with (
+            patch("src.pipeline.decompose", side_effect=fake_decompose),
+            patch("src.pipeline.retrieve", side_effect=lambda candidate, **kwargs: candidate),
+            patch("src.pipeline.verify", side_effect=fake_verify),
+            patch("src.pipeline.repair", side_effect=fake_repair),
+        ):
+            result = run_pipeline(record, max_repair_iterations=2)
+
+        self.assertEqual(repaired_inputs, ["Original.", "First revised."])
+        self.assertEqual(result.claims[0].id, "loop_c0")
+        self.assertEqual(result.repaired_answer, "Second revised.")
+        self.assertEqual(result.reliability_score_before, 0.0)
+        self.assertEqual(result.reliability_score_after, 1.0)
+
+    def test_supplied_claim_inventory_skips_initial_decomposition(self):
+        record = AnswerRecord(
+            id="fixed", source_dataset="manual", question="Q", answer="A fact.",
+            claims=[Claim(id="human_claim_7", text="A fact.", sentence_id=0)],
+        )
+
+        def fake_verify(candidate, **kwargs):
+            candidate.claims[0].label = "Supported"
+            candidate.reliability_score_before = 1.0
+            return candidate
+
+        with (
+            patch("src.pipeline.decompose", side_effect=AssertionError("unexpected decomposition")),
+            patch("src.pipeline.retrieve", side_effect=lambda candidate, **kwargs: candidate),
+            patch("src.pipeline.verify", side_effect=fake_verify),
+        ):
+            result = run_pipeline(record, use_existing_claims=True)
+
+        self.assertEqual([claim.id for claim in result.claims], ["human_claim_7"])
+        self.assertEqual(result.repair_iterations, 0)
+
+    def test_remove_policy_keeps_valid_empty_answer(self):
+        record = AnswerRecord(
+            id="remove", source_dataset="manual", question="Q", answer="Wrong claim.",
+            claims=[Claim(id="human_claim_1", text="Wrong claim.", sentence_id=0)],
+        )
+
+        def fake_verify(candidate, **kwargs):
+            candidate.claims[0].label = "Contradicted"
+            candidate.reliability_score_before = 0.0
+            return candidate
+
+        with (
+            patch("src.pipeline.decompose", side_effect=AssertionError("unexpected decomposition")),
+            patch("src.pipeline.retrieve", side_effect=lambda candidate, **kwargs: candidate),
+            patch("src.pipeline.verify", side_effect=fake_verify),
+            patch("src.repair.llm.call", return_value="REMOVE"),
+        ):
+            result = run_pipeline(
+                record, use_existing_claims=True, repair_policy="rewrite+remove",
+            )
+
+        self.assertEqual(result.repaired_answer, "")
+        self.assertEqual(result.reliability_score_after, 1.0)
+        self.assertEqual(result.repair_iterations, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

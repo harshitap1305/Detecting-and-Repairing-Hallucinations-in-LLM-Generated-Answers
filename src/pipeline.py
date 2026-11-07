@@ -39,9 +39,13 @@ def run_pipeline(
     # ── LLM & Verifier ──
     llm_model: str = "llama-3.3-70b-versatile",
     provider: str = "groq",
-    verifier: str = "llm",          # "llm" | "nli" | "ensemble"
+    verifier: str = "llm",          # "llm" | "nli" | "ensemble" | "trained"
+    trained_verifier_checkpoint: Optional[str] = None,
+    use_existing_claims: bool = False,
     # ── Repair & Loop ──
     repair_policy: str = "rewrite+hedge",
+    repair_backend: str = "prompted",  # "prompted" | "trained"
+    trained_repair_checkpoint: Optional[str] = None,
     max_repair_iterations: int = 2,
     # ── Logging ──
     verbose: bool = False,
@@ -51,6 +55,11 @@ def run_pipeline(
 
     Returns the mutated AnswerRecord with repaired_answer and reliability deltas populated.
     """
+    if verifier == "trained" and not trained_verifier_checkpoint:
+        raise ValueError("trained_verifier_checkpoint is required for verifier='trained'")
+    if repair_backend == "trained" and not trained_repair_checkpoint:
+        raise ValueError("trained_repair_checkpoint is required for repair_backend='trained'")
+
     record.run_id = (
         datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
         + "_" + uuid.uuid4().hex[:6]
@@ -61,8 +70,13 @@ def run_pipeline(
             print(f"[pipeline:{record.id}] {msg}")
 
     # ── Initial Pass (Stages 1–3) ──────────────────────────────────────────────
-    _log("Initial Pass: Decomposing...")
-    record = decompose(record, model=llm_model, provider=provider)
+    if use_existing_claims:
+        if not record.claims:
+            raise ValueError("use_existing_claims requires a nonempty claim inventory")
+        _log("Initial Pass: Using supplied claim inventory...")
+    else:
+        _log("Initial Pass: Decomposing...")
+        record = decompose(record, model=llm_model, provider=provider)
     _log(f"  Extracted {len(record.claims)} claims ({len(record.check_worthy_claims)} check-worthy)")
 
     _log("Initial Pass: Retrieving evidence...")
@@ -76,30 +90,41 @@ def run_pipeline(
     )
 
     _log("Initial Pass: Verifying claims...")
-    record = verify(record, model=llm_model, provider=provider, verifier=verifier)
+    record = verify(
+        record, model=llm_model, provider=provider, verifier=verifier,
+        trained_model_path=trained_verifier_checkpoint,
+    )
     _log(f"  Reliability BEFORE = {record.reliability_score_before:.2f}")
 
     # ── Iterative Repair & Re-verification Loop (Stages 4 & 5) ─────────────────
     current_answer = record.answer
+    working_record = record
     total_iterations_run = 0
 
     for iteration in range(1, max_repair_iterations + 1):
-        total_iterations_run = iteration
-        hallucinated = record.hallucinated_claims
+        hallucinated = working_record.hallucinated_claims
 
         if not hallucinated:
             _log(f"Iteration {iteration}: All claims Supported! Early stopping convergence.")
             break
 
+        total_iterations_run = iteration
         _log(f"Iteration {iteration}: Repairing {len(hallucinated)} hallucinated claims...")
-        record = repair(record, model=llm_model, provider=provider, policy=repair_policy)
+        working_record = repair(
+            working_record, model=llm_model, provider=provider, policy=repair_policy,
+            backend=repair_backend, trained_model_path=trained_repair_checkpoint,
+        )
 
         # Check if the repair made any changes
-        if not record.repaired_answer or record.repaired_answer == current_answer:
+        if working_record.repaired_answer is None or working_record.repaired_answer == current_answer:
             _log(f"Iteration {iteration}: Repaired answer identical to previous. Convergence reached.")
             break
 
-        current_answer = record.repaired_answer
+        current_answer = working_record.repaired_answer
+
+        if not current_answer:
+            _log(f"Iteration {iteration}: All flagged text removed.")
+            break
 
         # If more iterations remain, re-run verification on new candidate text
         if iteration < max_repair_iterations:
@@ -120,13 +145,22 @@ def run_pipeline(
                 faiss_index_path=faiss_index_path,
                 passages_path=passages_path,
             )
-            rev_candidate = verify(rev_candidate, model=llm_model, provider=provider, verifier=verifier)
+            rev_candidate = verify(
+                rev_candidate, model=llm_model, provider=provider, verifier=verifier,
+                trained_model_path=trained_verifier_checkpoint,
+            )
 
-            # Update claims to the newly verified claims
-            record.claims = rev_candidate.claims
+            # The next repair must use the revised answer and its own sentence
+            # IDs. Keep the original record's claims for paired evaluation.
+            working_record = rev_candidate
+
+    record.repaired_answer = current_answer
 
     # ── Final Re-Verification Pass ─────────────────────────────────────────────
-    if record.repaired_answer and record.repaired_answer != record.answer:
+    if record.repaired_answer == "":
+        # An intentionally empty answer has no factual claims to re-verify.
+        record.reliability_score_after = 1.0
+    elif record.repaired_answer is not None and record.repaired_answer != record.answer:
         _log("Final Re-verification on converged answer...")
         final_check = AnswerRecord(
             id=f"{record.id}_final",
@@ -144,7 +178,10 @@ def run_pipeline(
             faiss_index_path=faiss_index_path,
             passages_path=passages_path,
         )
-        final_check = verify(final_check, model=llm_model, provider=provider, verifier=verifier)
+        final_check = verify(
+            final_check, model=llm_model, provider=provider, verifier=verifier,
+            trained_model_path=trained_verifier_checkpoint,
+        )
         record.reliability_score_after = final_check.reliability_score_before
     else:
         record.repaired_answer = record.answer

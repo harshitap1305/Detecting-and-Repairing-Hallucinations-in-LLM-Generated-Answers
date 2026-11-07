@@ -93,6 +93,14 @@ class TestDemoComponents(unittest.TestCase):
         self.assertIn("Reliability Gain", metrics_html)
         self.assertEqual(len(table_data), 2)
 
+    @patch("demo.app.run_pipeline", side_effect=RuntimeError("checkpoint missing"))
+    def test_pipeline_failure_does_not_show_invented_results(self, mock_pipeline):
+        high_html, diff_html, metrics_html, table_data = run_interactive_pipeline(
+            "Where was Einstein born?", "Einstein was born in Berlin."
+        )
+        self.assertIn("checkpoint missing", high_html)
+        self.assertEqual((diff_html, metrics_html, table_data), ("", "", []))
+
 
 if __name__ == "__main__":
     unittest.main()

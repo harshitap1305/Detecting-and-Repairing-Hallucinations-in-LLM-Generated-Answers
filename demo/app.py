@@ -31,7 +31,6 @@ from typing import Any, Dict, List, Optional, Tuple
 # Allow importing src modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.decompose import decompose
 from src.pipeline import run_pipeline
 from src.schema import AnswerRecord, Claim, EvidencePassage
 
@@ -215,6 +214,9 @@ def run_interactive_pipeline(
     verifier_type: str = "ensemble",
     repair_policy: str = "rewrite+hedge",
     max_iterations: int = 2,
+    repair_backend: str = "prompted",
+    trained_verifier_checkpoint: str = "",
+    trained_repair_checkpoint: str = "",
     top_k: int = 5,
 ) -> Tuple[str, str, str, List[List[Any]]]:
     """
@@ -266,25 +268,22 @@ def run_interactive_pipeline(
             retriever_method=retriever_method,
             top_k=top_k,
             verifier=verifier_type,
+            trained_verifier_checkpoint=trained_verifier_checkpoint or None,
             repair_policy=repair_policy,
+            repair_backend=repair_backend,
+            trained_repair_checkpoint=trained_repair_checkpoint or None,
             max_repair_iterations=int(max_iterations),
             verbose=False,
         )
     except Exception as exc:
-        # Fallback heuristic if API keys or remote servers are unreachable
-        processed_record = decompose(record)
-        for c in processed_record.claims:
-            c.label = "Supported" if "1879" in c.text or "1867" in c.text else "Contradicted"
-            c.label_rationale = "Heuristic evaluation (fallback mode)"
-        processed_record.repaired_answer = (
-            processed_record.answer.replace("Berlin", "Ulm").replace("London", "Edinburgh")
+        return (
+            f"<div role='alert'>Pipeline failed: {html.escape(str(exc))}</div>",
+            "", "", [],
         )
-        processed_record.reliability_score_before = 0.50
-        processed_record.reliability_score_after = 1.00
-        processed_record.repair_iterations = 1
 
     highlighted_html = format_highlighted_text(processed_record)
-    repaired_text = processed_record.repaired_answer or processed_record.answer
+    repaired_text = (processed_record.repaired_answer if processed_record.repaired_answer is not None
+                     else processed_record.answer)
     diff_html = generate_word_diff_html(processed_record.answer, repaired_text)
     metrics_html = format_metrics_banner(processed_record)
     claims_table = format_claims_table(processed_record)
@@ -298,36 +297,16 @@ SAMPLE_EXAMPLES = [
     [
         "Where was Albert Einstein born?",
         "Albert Einstein was born in 1879 in Berlin, Germany. He developed relativity and later won the Nobel Prize in 1921.",
-        "bm25",
-        "ensemble",
-        "rewrite+hedge",
-        2,
     ],
     [
         "Who invented the telephone and where was he born?",
         "Alexander Graham Bell invented the telephone in 1876. He was born in London, England.",
-        "bm25",
-        "ensemble",
-        "rewrite+hedge",
-        2,
     ],
     [
         "Tell me about Marie Curie's achievements.",
         "Marie Curie was born in Paris. She was the first woman to win a Nobel Prize and I believe she was the greatest scientist ever.",
-        "bm25",
-        "ensemble",
-        "rewrite+hedge",
-        2,
     ],
 ]
-
-PRECOMPUTED_BENCHMARKS = [
-    {"Benchmark": "HaluEval QA (Factual)", "Answers Evaluated": 200, "Initial SCR": 0.521, "Repaired SCR": 0.908, "SCR Gain": "+0.387", "Preservation Rate": "95.2%", "Convergence Iter 1": "89.4%"},
-    {"Benchmark": "FELM (World Knowledge)", "Answers Evaluated": 180, "Initial SCR": 0.548, "Repaired SCR": 0.914, "SCR Gain": "+0.366", "Preservation Rate": "94.6%", "Convergence Iter 1": "88.1%"},
-    {"Benchmark": "WikiBio GPT-3 (Biographies)", "Answers Evaluated": 150, "Initial SCR": 0.493, "Repaired SCR": 0.895, "SCR Gain": "+0.402", "Preservation Rate": "93.8%", "Convergence Iter 1": "87.0%"},
-    {"Benchmark": "Factcheck-Bench (Held-out)", "Answers Evaluated": 100, "Initial SCR": 0.562, "Repaired SCR": 0.922, "SCR Gain": "+0.360", "Preservation Rate": "96.0%", "Convergence Iter 1": "90.2%"},
-]
-
 
 def build_app():
     """Build the Gradio application."""
@@ -408,12 +387,25 @@ def build_app():
                             info="BM25 keyword search, Dense BGE-small embeddings, or Hybrid RRF",
                         )
                         verifier_dropdown = gr.Dropdown(
-                            choices=["ensemble", "llm", "nli"],
+                            choices=["ensemble", "llm", "nli", "trained"],
                             value="ensemble",
                             label="Claim Verifier",
-                            info="Calibrated Ensemble (NLI + LLM Judge), LLM Judge Only, or DeBERTa-v3 NLI Only",
+                            info="Choose a trained checkpoint only after Path A training has completed",
+                        )
+                        verifier_checkpoint = gr.Textbox(
+                            label="Trained Verifier Checkpoint Directory",
+                            placeholder="/content/drive/MyDrive/hallucination_project/checkpoints/verifier",
                         )
                     with gr.Column():
+                        repair_backend_dropdown = gr.Dropdown(
+                            choices=["prompted", "trained"],
+                            value="prompted",
+                            label="Repair Backend",
+                        )
+                        repair_checkpoint = gr.Textbox(
+                            label="Trained Repair Checkpoint Directory",
+                            placeholder="/content/drive/MyDrive/hallucination_project/checkpoints/repair",
+                        )
                         policy_dropdown = gr.Dropdown(
                             choices=["rewrite+hedge", "rewrite+remove", "rewrite-only"],
                             value="rewrite+hedge",
@@ -429,43 +421,23 @@ def build_app():
                             info="Number of re-verification loops with early stopping convergence",
                         )
 
-                gr.HTML("""
-                <div style='background: #f1f3f5; padding: 15px; border-radius: 8px; margin-top: 15px;'>
-                    <h4 style='margin-top: 0;'>Active Decision Boundaries & Safety Guards:</h4>
-                    <ul>
-                        <li><strong>Entailment Threshold (τ_s):</strong> 0.50 (Calibrated on dev set)</li>
-                        <li><strong>Contradiction Threshold (τ_c):</strong> 0.35 (Calibrated on dev set)</li>
-                        <li><strong>Preservation Guard:</strong> Active (Rejects edits dropping supported claims)</li>
-                        <li><strong>Grounding Guard:</strong> Active (Rejects newly introduced ungrounded numbers/entities)</li>
-                    </ul>
-                </div>
-                """)
+                gr.Markdown("Trained backends require local checkpoint directories. Repair still uses the preservation and grounding guards.")
 
             # ─── TAB 4: Batch Benchmark Viewer ───
             with gr.TabItem("📊 Batch Benchmark Viewer"):
-                gr.Markdown("### Pre-Computed Evaluation Benchmarks Across Datasets")
-                benchmark_table = gr.DataFrame(
-                    value=[list(b.values()) for b in PRECOMPUTED_BENCHMARKS],
-                    headers=list(PRECOMPUTED_BENCHMARKS[0].keys()),
-                    interactive=False,
+                gr.Markdown(
+                    "No benchmark results are bundled with this repository. Run the evaluation scripts "
+                    "on held-out data and publish their inputs and outputs before presenting scores."
                 )
-
-                gr.HTML("""
-                <div style='margin-top: 20px; padding: 15px; background: #fafafa; border: 1px solid #eee; border-radius: 8px;'>
-                    <h4>Key Scientific Findings:</h4>
-                    <ul>
-                        <li><strong>Preservation Rate:</strong> 94.8% vs. 61.2% for RARR monolithic rewrite (p < 0.001)</li>
-                        <li><strong>Over-Edit Rate:</strong> 5.2% (Proposed) vs. 38.8% (RARR)</li>
-                        <li><strong>Reliability Gain (Δ SCR):</strong> +0.370 overall improvement in supported claim ratio</li>
-                        <li><strong>Zero Ungrounded Hallucinations:</strong> Programmatic grounding guards caught and recovered 81.8% of invalid candidate edits</li>
-                    </ul>
-                </div>
-                """)
 
         # Connect run button
         run_btn.click(
             fn=run_interactive_pipeline,
-            inputs=[input_q, input_a, retriever_dropdown, verifier_dropdown, policy_dropdown, iterations_slider],
+            inputs=[
+                input_q, input_a, retriever_dropdown, verifier_dropdown,
+                policy_dropdown, iterations_slider,
+                repair_backend_dropdown, verifier_checkpoint, repair_checkpoint,
+            ],
             outputs=[highlighted_display, diff_display, metrics_display, claims_table_comp],
         )
 
