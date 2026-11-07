@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 from typing import List, Optional, Tuple
 
 from src.schema import AnswerRecord, Claim
@@ -40,15 +39,12 @@ def _get_nlp():
     if _nlp is None:
         try:
             import spacy
-            try:
-                _nlp = spacy.load("en_core_web_sm")
-            except OSError:
-                subprocess.run(["python", "-m", "spacy", "download", "en_core_web_sm"],
-                               check=True)
-                _nlp = spacy.load("en_core_web_sm")
-        except (ImportError, ModuleNotFoundError, Exception):
-            _nlp = None
-    return _nlp
+            _nlp = spacy.load("en_core_web_sm")
+        except (ImportError, OSError):
+            # Sentence splitting must also work offline and in test runners.
+            # Installing a model is an explicit setup step, never a runtime side effect.
+            _nlp = False
+    return _nlp if _nlp is not False else None
 
 
 def split_sentences_with_spans(text: str) -> List[Tuple[str, int, int]]:

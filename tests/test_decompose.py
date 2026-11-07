@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from src.schema import AnswerRecord
@@ -47,6 +48,23 @@ class TestSentenceSplittingAndSpans(unittest.TestCase):
     def test_split_sentences_empty(self):
         self.assertEqual(split_sentences(""), [])
         self.assertEqual(split_sentences_with_spans(""), [])
+
+    def test_missing_spacy_model_uses_offline_fallback(self):
+        import src.decompose as module
+
+        loads = []
+
+        def missing_model(name):
+            loads.append(name)
+            raise OSError("English model is unavailable")
+
+        with patch.object(module, "_nlp", None), patch.dict(
+            "sys.modules", {"spacy": SimpleNamespace(load=missing_model)}
+        ):
+            text = "First fact. Second fact."
+            self.assertEqual(module.split_sentences(text), ["First fact.", "Second fact."])
+            self.assertEqual(module.split_sentences(text), ["First fact.", "Second fact."])
+        self.assertEqual(loads, ["en_core_web_sm"])
 
 
 class TestSpanAlignment(unittest.TestCase):
