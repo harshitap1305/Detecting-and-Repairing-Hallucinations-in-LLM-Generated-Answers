@@ -132,7 +132,8 @@ project/
 │   ├── spec.md             ← task definitions, label schema
 │   ├── literature_notes.md
 │   ├── baseline_status.md  ← evidence audit of reported results
-│   └── training_workflow.md ← A+C training and evaluation steps
+│   ├── training_workflow.md ← A+C training and evaluation steps
+│   └── gold_annotation_workflow.md ← validate human annotations
 ├── configs/
 │   ├── default.yaml        ← all model/threshold/policy settings
 │   └── ablations/
@@ -155,6 +156,9 @@ project/
 ├── scripts/
 │   ├── download_data.py    ← fetch & convert all datasets
 │   ├── build_index.py      ← build BM25 + FAISS indexes
+│   ├── build_fever_fts.py  ← stream full FEVER pages to SQLite FTS5
+│   ├── retrieve_fever_evidence.py ← resumable FEVER retrieval
+│   ├── validate_gold.py    ← check annotations and holdout keys
 │   ├── prepare_fever_verifier.py ← prepare Path A training data
 │   ├── build_repair_data.py ← prepare Path C training data
 │   ├── train_verifier.py / train_repair.py
@@ -211,7 +215,9 @@ sentences. Install `requirements-training.txt` in a GPU Colab runtime and follow
 [the full workflow](docs/training_workflow.md) or
 [the Colab notebook](notebooks/04_train_A_C_colab.ipynb). The workflow prepares
 article-disjoint splits, saves data and checkpoints to Drive, and records exact
-run inputs and package versions.
+run inputs and package versions. The FEVER training route uses a streaming
+SQLite FTS5 index and resumes interrupted claim retrieval. Before reporting a
+paired course-project score, [validate the human gold set](docs/gold_annotation_workflow.md).
 
 The pipeline accepts `verifier="trained"` with
 `trained_verifier_checkpoint=...`, and `repair_backend="trained"` with
