@@ -17,6 +17,7 @@ Colab:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import random
 import sys
@@ -45,7 +46,8 @@ def load_halueval(out_dir: Path, seed: int) -> list[AnswerRecord]:
     HaluEval QA subset.
     HF: pminervini/HaluEval, config qa_samples
     Fallback: RUCAIBox/HaluEval
-    Use hallucinated_answer as the answer to detect (it contains hallucinations).
+    qa_samples uses ``answer`` (correct) and ``hallucination`` (incorrect).
+    qa uses ``right_answer`` and ``hallucinated_answer`` instead.
     """
     print("\nLoading HaluEval…")
     try:
@@ -66,12 +68,21 @@ def load_halueval(out_dir: Path, seed: int) -> list[AnswerRecord]:
     rng.shuffle(items)
 
     for i, ex in enumerate(items):
-        # HaluEval fields: question, right_answer, hallucinated_answer, hallucination
         question = ex.get("question", ex.get("query", ""))
-        answer = ex.get("hallucinated_answer", ex.get("answer", ""))
-        gold = ex.get("right_answer", ex.get("correct_answer", None))
+        if "hallucination" in ex and "answer" in ex:
+            answer, gold = ex["hallucination"], ex["answer"]
+        elif "hallucinated_answer" in ex and "right_answer" in ex:
+            answer, gold = ex["hallucinated_answer"], ex["right_answer"]
+        else:
+            raise ValueError(f"Unsupported HaluEval QA fields at row {i}: {sorted(ex)}")
+        if any(not isinstance(value, str) or not value.strip()
+               for value in (question, answer, gold)):
+            raise ValueError(f"Incomplete HaluEval QA text at row {i}")
 
-        split = "test" if i % 5 == 0 else "dev"   # 80 / 20
+        # A question that occurs more than once must stay in one split.
+        prompt_key = " ".join(question.casefold().split())
+        bucket = hashlib.sha256(f"{seed}:{prompt_key}".encode()).digest()[0]
+        split = "test" if bucket < 51 else "dev"  # approximately 20% test
         rec = AnswerRecord(
             id=f"halueval_{i:05d}",
             source_dataset="halueval",
@@ -81,6 +92,9 @@ def load_halueval(out_dir: Path, seed: int) -> list[AnswerRecord]:
             gold_repaired_answer=gold,
         )
         records.append(rec)
+
+    if not records:
+        raise ValueError("HaluEval QA dataset is empty")
 
     _write_jsonl(records, out_dir / "halueval.jsonl")
     dev_n = sum(1 for r in records if r.split == "dev")
@@ -238,11 +252,11 @@ def load_factcheck_bench(out_dir: Path, seed: int) -> list[AnswerRecord]:
 
 # ─── Splits file ──────────────────────────────────────────────────────────────
 
-def save_splits(all_records: list[AnswerRecord], splits_path: Path) -> None:
+def save_splits(all_records: list[AnswerRecord], splits_path: Path, seed: int = 42) -> None:
     dev_ids = [r.id for r in all_records if r.split == "dev"]
     test_ids = [r.id for r in all_records if r.split == "test"]
     splits = {
-        "seed": 42,
+        "seed": seed,
         "dev_ids": dev_ids,
         "test_ids": test_ids,
         "note": "Split by question/prompt. Held-out benchmarks: FELM, WikiBio, Factcheck-Bench (all test).",
@@ -286,7 +300,7 @@ def main() -> None:
         records = loaders[name](out_dir, args.seed)
         all_records.extend(records)
 
-    save_splits(all_records, Path(args.splits_file))
+    save_splits(all_records, Path(args.splits_file), seed=args.seed)
     print("\n✅ All requested datasets processed.")
     print("Next step: build indexes with scripts/build_index.py")
 
