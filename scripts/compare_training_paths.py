@@ -165,11 +165,15 @@ def checkpoint_manifest(path: Path) -> dict[str, Any]:
 def validate_inputs(config: Config) -> tuple[list[AnswerRecord], list[AnswerRecord], dict]:
     if config.top_k < 1 or config.max_repair_iterations < 1 or config.n_bootstrap < 1:
         raise ValueError("top_k, max_repair_iterations and n_bootstrap must be positive")
-    if config.retriever_method not in {"bm25", "dense", "hybrid"}:
-        raise ValueError("retriever_method must be bm25, dense or hybrid")
+    if config.retriever_method not in {"bm25", "fts5", "dense", "hybrid"}:
+        raise ValueError("retriever_method must be bm25, fts5, dense or hybrid")
     if not config.index.is_file():
         raise FileNotFoundError(f"Retrieval index missing: {config.index}")
-    if config.retriever_method != "bm25" and (
+    if config.retriever_method == "fts5":
+        from scripts.build_fever_fts import FtsRetriever
+        with FtsRetriever(config.index):
+            pass
+    if config.retriever_method in {"dense", "hybrid"} and (
         config.faiss_index is None or not config.faiss_index.is_file()
         or config.passages is None or not config.passages.is_file()
     ):
@@ -426,7 +430,7 @@ def parse_args() -> Config:
         parser.add_argument(f"--{name}", type=Path, required=True)
     parser.add_argument("--repo-root", type=Path,
                         default=Path(__file__).resolve().parent.parent)
-    parser.add_argument("--retriever-method", choices=("bm25", "dense", "hybrid"),
+    parser.add_argument("--retriever-method", choices=("bm25", "fts5", "dense", "hybrid"),
                         default="bm25")
     parser.add_argument("--faiss-index", type=Path)
     parser.add_argument("--passages", type=Path)

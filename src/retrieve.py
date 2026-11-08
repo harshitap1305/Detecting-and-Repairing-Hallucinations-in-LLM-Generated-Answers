@@ -77,6 +77,30 @@ def _make_retrieval_key(method: str, query: str, top_k: int, rerank: bool) -> st
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
+def _index_identity(path: Optional[str]) -> tuple | None:
+    """Bind cached evidence to the actual on-disk index version."""
+    if path is None:
+        return None
+    file = Path(path).resolve()
+    stat = file.stat()
+    return str(file), stat.st_size, stat.st_mtime_ns
+
+
+def _scoped_retrieval_key(method: str, query: str, top_k: int,
+                          index_path: str, faiss_index_path: Optional[str],
+                          passages_path: Optional[str], encoder_name: str,
+                          cross_encoder_name: str) -> str:
+    payload = json.dumps({
+        "method": method, "query": query.strip().casefold(), "top_k": top_k,
+        "index": _index_identity(index_path),
+        "faiss_index": _index_identity(faiss_index_path),
+        "passages": _index_identity(passages_path),
+        "encoder": encoder_name if method.startswith(("dense", "hybrid")) else None,
+        "cross_encoder": cross_encoder_name if "+rerank" in method else None,
+    }, sort_keys=True)
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
 def _cache_get_passages(key: str) -> Optional[List[EvidencePassage]]:
     try:
         row = _get_retrieval_conn().execute(
@@ -153,6 +177,14 @@ def retrieve_bm25(
             chunk_id=int(p.get("chunk_id", 0)),
         ))
     return results
+
+
+def retrieve_fts5(query: str, index_path: str, top_k: int = 5) -> List[EvidencePassage]:
+    """Retrieve from a streaming-built FEVER SQLite FTS5 index."""
+    from scripts.build_fever_fts import FtsRetriever
+
+    with FtsRetriever(Path(index_path)) as retriever:
+        return retriever.retrieve(query, top_k=top_k)
 
 
 # ─── Dense Retrieval ──────────────────────────────────────────────────────────
@@ -305,6 +337,7 @@ def retrieve(
 
     Supported methods:
       - "bm25"
+      - "fts5"
       - "dense"
       - "hybrid"
       - "bm25+rerank"
@@ -317,7 +350,10 @@ def retrieve(
         if not claim.check_worthy:
             continue
 
-        cache_key = _make_retrieval_key(method, claim.text, top_k, rerank)
+        cache_key = _scoped_retrieval_key(
+            method, claim.text, top_k, index_path, faiss_index_path,
+            passages_path, encoder_name, cross_encoder_name,
+        )
         if use_cache:
             cached = _cache_get_passages(cache_key)
             if cached is not None:
@@ -329,6 +365,8 @@ def retrieve(
 
         if base_method == "bm25":
             candidates = retrieve_bm25(claim.text, index_path, top_k=fetch_k)
+        elif base_method == "fts5":
+            candidates = retrieve_fts5(claim.text, index_path, top_k=fetch_k)
         elif base_method == "dense":
             assert faiss_index_path and passages_path, "dense retrieval requires faiss_index_path and passages_path"
             candidates = retrieve_dense(

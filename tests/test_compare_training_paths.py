@@ -1,10 +1,13 @@
 """The paired comparison must reject incomplete data and partial pipeline runs."""
 
 import json
+import sqlite3
+from dataclasses import replace
 
 import pytest
 
 from scripts import compare_training_paths as comparison
+from scripts.build_fever_fts import build_index
 from src.schema import AnswerRecord, Claim
 
 
@@ -156,3 +159,13 @@ def test_empty_repair_is_valid_for_delete_policy(tmp_path):
     comparison.validate_output(result, source, gold)
     metrics = comparison.reference_repair_metrics([result], {source.id: gold}, 10, 42)
     assert metrics["exact_match"]["mean"] == 1.0
+
+
+def test_fts5_comparison_accepts_a_valid_shared_index(tmp_path):
+    config = fixture_config(tmp_path)
+    index = tmp_path / "index.sqlite"
+    build_index(iter([{"doc_id": "doc_0", "title": "Doc", "text": "A fact",
+                       "chunk_id": 0}]), index, source="fixture")
+    comparison.validate_inputs(replace(config, index=index, retriever_method="fts5"))
+    with pytest.raises(sqlite3.DatabaseError):
+        comparison.validate_inputs(replace(config, retriever_method="fts5"))

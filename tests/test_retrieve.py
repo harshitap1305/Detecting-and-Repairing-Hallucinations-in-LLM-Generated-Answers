@@ -7,9 +7,13 @@ Run with:
 from __future__ import annotations
 
 import os
+import importlib
 import pickle
+import sys
 import tempfile
+import types
 import unittest
+from unittest import mock
 from pathlib import Path
 
 import numpy as np
@@ -25,6 +29,39 @@ from src.retrieve import (
     retrieve_bm25,
     retrieve,
 )
+
+
+def test_cache_does_not_mix_different_indexes(tmp_path, monkeypatch):
+    retrieval = importlib.import_module("src.retrieve")
+    monkeypatch.setenv("RETRIEVAL_CACHE_PATH", str(tmp_path / "cache.db"))
+    monkeypatch.setattr(retrieval, "_retrieval_conn", None)
+    first_index = tmp_path / "first.pkl"
+    second_index = tmp_path / "second.pkl"
+    first_index.write_bytes(b"first")
+    second_index.write_bytes(b"second")
+    calls = []
+
+    def fake_retrieve(query, index_path, top_k):
+        calls.append(index_path)
+        title = Path(index_path).stem
+        return [EvidencePassage(doc_id=title, title=title, text=title)]
+
+    monkeypatch.setattr(retrieval, "retrieve_bm25", fake_retrieve)
+
+    def fresh_record():
+        return AnswerRecord(
+            id="r", source_dataset="manual", question="Q", answer="A.",
+            claims=[Claim(id="r_c1", text="same claim", sentence_id=0)],
+        )
+
+    a = retrieval.retrieve(fresh_record(), str(first_index))
+    b = retrieval.retrieve(fresh_record(), str(second_index))
+    again = retrieval.retrieve(fresh_record(), str(first_index))
+    assert [a.claims[0].evidence[0].title, b.claims[0].evidence[0].title,
+            again.claims[0].evidence[0].title] == ["first", "second", "first"]
+    assert calls == [str(first_index), str(second_index)]
+    retrieval._retrieval_conn.close()
+    monkeypatch.setattr(retrieval, "_retrieval_conn", None)
 
 
 class SimpleMockBM25:
@@ -103,7 +140,12 @@ class TestCrossEncoderReranking(unittest.TestCase):
         p2 = EvidencePassage(doc_id="p2", title="P2", text="Text 2", score=5.0)
         candidates = [p1, p2]
         # In environment without cross-encoder installed, falls back safely
-        reranked = rerank_cross_encoder("query", candidates, top_k=1)
+        unavailable = types.ModuleType("sentence_transformers")
+        unavailable.CrossEncoder = mock.Mock(side_effect=RuntimeError("model unavailable"))
+        retrieval = importlib.import_module("src.retrieve")
+        with mock.patch.dict(sys.modules, {"sentence_transformers": unavailable}), \
+                mock.patch.object(retrieval, "_cross_encoder", None):
+            reranked = rerank_cross_encoder("query", candidates, top_k=1)
         self.assertEqual(len(reranked), 1)
         self.assertEqual(reranked[0].doc_id, "p1")
 
@@ -155,7 +197,13 @@ class TestRetrieve(unittest.TestCase):
         record.claims = [
             Claim(id="c1", text="Isaac Newton formulated laws in 1687.", sentence_id=0)
         ]
-        result = retrieve(record, index_path=self.index_path, method="bm25+rerank", top_k=1)
+        retrieval = importlib.import_module("src.retrieve")
+        with mock.patch.object(retrieval, "rerank_cross_encoder",
+                               side_effect=lambda query, candidates, top_k, model_name:
+                               candidates[:top_k]) as rerank:
+            result = retrieve(record, index_path=self.index_path,
+                              method="bm25+rerank", top_k=1)
+        rerank.assert_called_once()
         self.assertEqual(len(result.claims[0].evidence), 1)
 
 
