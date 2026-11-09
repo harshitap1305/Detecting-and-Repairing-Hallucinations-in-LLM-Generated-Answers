@@ -2,7 +2,7 @@
 
 Increment 3 implements corrected detection scoring, blinded human review, and
 paired comparisons. All commands consume saved outputs; none invokes an LLM,
-retriever, or training job. Final report/bundle generation is increment 4.
+retriever, or training job. The implemented [report/bundle workflow](evaluation_bundles.md) is increment 4.
 Actual gold annotations and independent reviews remain human work.
 
 ## Score a complete runner directory

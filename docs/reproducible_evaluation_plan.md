@@ -1,11 +1,13 @@
 # Implementation plan: reproducible evaluation package
 
-Status: increments 1–3 implemented: preparation, resumable execution, corrected
-scoring, independent human review import/export and adjudication, and paired
-statistics. Human annotations/reviews and measured experiments are still required.
-Final report/bundle generation is increment 4. See [the protocol](evaluation_protocol.md),
-[benchmark execution](benchmark_runner.md), and
-[offline evaluation](independent_evaluation.md).
+Status: implementation increments 1–4 are implemented: preparation, resumable
+execution, corrected scoring and independent-review tooling, report generation,
+and offline bundle auditing with CI lifecycle coverage. Increment 5 remains:
+actual human annotation/review, a live development pilot, and final benchmark
+execution. No measured result is claimed by the synthetic tests. See
+[the protocol](evaluation_protocol.md), [benchmark execution](benchmark_runner.md),
+[offline evaluation](independent_evaluation.md), and
+[result bundles](evaluation_bundles.md).
 
 ## Objective and boundaries
 

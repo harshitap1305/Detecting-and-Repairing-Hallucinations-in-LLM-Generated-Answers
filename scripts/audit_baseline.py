@@ -111,7 +111,7 @@ def audit(root: Path, checkpoint: Path | None = None) -> tuple[list[str], bool, 
     return lines, complete, checkpoint_present
 
 
-def main() -> int:
+def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--repo-root", type=Path, default=Path(__file__).resolve().parent.parent
@@ -121,7 +121,25 @@ def main() -> int:
         "--require-checkpoint", action="store_true",
         help="Also require a trained model weight file for a zero exit status",
     )
-    args = parser.parse_args()
+    parser.add_argument("--bundle", type=Path, help="Audit a versioned report bundle instead of legacy artifacts")
+    parser.add_argument("--gold", type=Path, help="Exact external gold JSONL required for bundle auditing")
+    parser.add_argument("--no-recompute", action="store_true", help="Check bundle structure/integrity without resampling metrics")
+    args = parser.parse_args(argv)
+    if args.bundle:
+        if not args.gold or args.checkpoint or args.require_checkpoint:
+            parser.error("Bundle mode requires --gold and does not accept checkpoint flags")
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        from src.experiments.reporting import audit_bundle
+        try:
+            result = audit_bundle(args.bundle, args.gold, recompute=not args.no_recompute)
+        except (OSError, ValueError, KeyError, TypeError, ImportError) as exc:
+            print(f"Bundle audit failed: {exc}")
+            return 1
+        print(json.dumps(result, sort_keys=True))
+        return 0
+    if args.gold or args.no_recompute:
+        parser.error("--gold and --no-recompute require --bundle")
 
     lines, baseline_present, checkpoint_present = audit(
         args.repo_root.resolve(), args.checkpoint.resolve() if args.checkpoint else None

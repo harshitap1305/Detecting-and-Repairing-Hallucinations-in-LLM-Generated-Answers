@@ -1,0 +1,7 @@
+# Offline CPU tests. Install a CPU PyTorch build separately (see CI workflow).
+pytest>=8,<10
+numpy>=1.26,<3
+scipy>=1.13,<2
+PyYAML>=6,<7
+rank-bm25>=0.2,<1
+nbformat>=5,<6

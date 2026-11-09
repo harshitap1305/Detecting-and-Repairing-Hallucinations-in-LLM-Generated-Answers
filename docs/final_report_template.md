@@ -1,5 +1,10 @@
 # Detecting and Repairing Hallucinations in LLM-Generated Answers: An Evidence-Grounded, Guarded Localization Framework
 
+> **Historical unverified content:** This document is not generated from a
+> validated result bundle. For measured results, use the
+> [report-generation workflow](evaluation_bundles.md) and retain its audited
+> artifacts. Existing numbers below are not substituted into generated reports.
+
 > **Draft results:** The benchmark numbers in this template have not been
 > reproduced from tracked experiment artifacts. Replace them with results from
 > held-out runs before submission. See [baseline status](baseline_status.md).

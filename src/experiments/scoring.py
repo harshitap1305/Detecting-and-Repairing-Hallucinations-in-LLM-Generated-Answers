@@ -60,7 +60,7 @@ def load_gold(path):
     return result
 
 
-def load_run(directory: Path, gold: dict) -> dict:
+def load_run(directory: Path, gold: dict, *, allow_partial=False) -> dict:
     """Verify saved outputs against immutable attempts without loading any model."""
     from src.experiments.runner import _read_attempts
     from src.experiments.protocol import validate_config
@@ -70,7 +70,8 @@ def load_run(directory: Path, gold: dict) -> dict:
     if manifest.get("schema_version") != 1 or identity.get("schema_version") != 1:
         raise ValueError("Unsupported run schema")
     validate_config(identity["config"])
-    if manifest.get("run_id") != fingerprint(identity) or manifest.get("status") != "execution_complete":
+    statuses = {"execution_complete", "incomplete"} if allow_partial else {"execution_complete"}
+    if manifest.get("run_id") != fingerprint(identity) or manifest.get("status") not in statuses:
         raise ValueError("Evaluation requires a complete, consistent execution manifest")
     task = identity["task"]
     if task not in ("repair", "claim_verification", "answer_detection"):
@@ -82,18 +83,19 @@ def load_run(directory: Path, gold: dict) -> dict:
         raise ValueError("Run and gold split mismatch")
     systems = {system["id"]: system for system in identity["config"]["systems"] if task in system["tasks"]}
     expected = len(gold) * len(systems)
-    if not systems or manifest.get("successful_outputs") != expected or manifest.get("expected_outputs") != expected:
+    if not systems or manifest.get("expected_outputs") != expected or (not allow_partial and manifest.get("successful_outputs") != expected):
         raise ValueError("Incomplete declared system coverage")
     inventory = {key: record.claims for key, record in gold.items()} if task == "claim_verification" else {}
     attempts, _ = _read_attempts(directory, gold, systems, task, inventory)
-    if len(attempts) != expected:
+    if len(attempts) != manifest.get("successful_outputs") or (not allow_partial and len(attempts) != expected):
         raise ValueError("Missing committed successful attempts")
     outputs = {}
     declared = {f"{system}.jsonl" for system in systems}
     if {path.name for path in (directory / "outputs").glob("*.jsonl")} != declared:
         raise ValueError("Missing or extra system output files")
     for system in systems:
-        rows = jsonl(directory / "outputs" / f"{system}.jsonl")
+        path = directory / "outputs" / f"{system}.jsonl"
+        rows = jsonl(path) if path.read_text(encoding="utf-8").strip() else []
         mapped = {}
         for row in rows:
             record_id = row["input"]["id"]
@@ -103,8 +105,9 @@ def load_run(directory: Path, gold: dict) -> dict:
             if canonical(row) != canonical(attempts[(system, record_id)]):
                 raise ValueError("Aggregate output differs from committed attempt")
             mapped[record_id] = row
-        if set(mapped) != set(gold):
-            raise ValueError("Output IDs must exactly match gold")
+        expected_ids = {record_id for (name, record_id) in attempts if name == system}
+        if set(mapped) != expected_ids or (not allow_partial and set(mapped) != set(gold)):
+            raise ValueError("Output IDs must exactly match gold and committed successes")
         outputs[system] = mapped
     return {"manifest": manifest, "outputs": outputs,
             "manifest_sha256": file_hash(directory / "manifest.json")}
@@ -171,3 +174,20 @@ def score_run(run, gold, n_bootstrap=1000, seed=42):
     return {"comparisons": comparisons, "schema_version": 1, "run_id": run["manifest"]["run_id"], "task": task,
             "systems": results, "n_records": len(ids), "record_ids": ids,
             "interpretation": "Reference similarity and native diagnostics are not independent factual judgments"}
+
+
+def evaluate_run(run, gold, assessments=None, n_bootstrap=1000, seed=42):
+    """Pure offline scoring shared by the CLI and reproducible bundle builder."""
+    from src.experiments.assessment import validate_assessments, score_assessments
+    metrics = score_run(run, gold, n_bootstrap, seed)
+    if assessments is not None:
+        if metrics["task"] != "repair":
+            raise ValueError("Repair assessments apply only to repair runs")
+        validate_assessments(assessments, run, gold)
+        metrics["human_repair"] = score_assessments(assessments, gold, n_bootstrap, seed)
+        metrics["assessment_status"] = "adjudicated" if assessments.get("adjudicated") else "single_reviewer"
+        for system in metrics["systems"]:
+            metrics["systems"][system]["independent_repair"] = {
+                "status": "available", "assessment_status": metrics["assessment_status"],
+                **metrics["human_repair"]["systems"][system]}
+    return metrics

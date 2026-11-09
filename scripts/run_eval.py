@@ -43,7 +43,7 @@ def main(argv=None):
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args(argv)
     if args.run_dir:
-        from src.experiments.scoring import load_gold, load_run, score_run
+        from src.experiments.scoring import load_gold, load_run, evaluate_run
         from src.experiments.assessment import validate_assessments, score_assessments
         from src.experiments.artifacts import canonical, file_hash
         try:
@@ -51,18 +51,8 @@ def main(argv=None):
                 raise ValueError("Runner scoring requires --gold and a new --output, without --results")
             gold = load_gold(Path(args.gold))
             run = load_run(args.run_dir, gold)
-            metrics = score_run(run, gold, args.n_bootstrap, args.seed)
-            if args.assessments:
-                if metrics["task"] != "repair":
-                    raise ValueError("Repair assessments apply only to repair runs")
-                ratings = validate_assessments(json.loads(args.assessments.read_text()), run, gold)
-                metrics["human_repair"] = score_assessments(ratings, gold, args.n_bootstrap, args.seed)
-                metrics["assessment_status"] = "adjudicated" if ratings.get("adjudicated") else "single_reviewer"
-                for system in metrics["systems"]:
-                    metrics["systems"][system]["independent_repair"] = {
-                        "status": "available", "assessment_status": metrics["assessment_status"],
-                        **metrics["human_repair"]["systems"][system]}
-
+            ratings = json.loads(args.assessments.read_text()) if args.assessments else None
+            metrics = evaluate_run(run, gold, ratings, args.n_bootstrap, args.seed)
             from src.experiments.runner import code_identity, environment
             metrics["scoring_provenance"] = {"code": code_identity(), "environment": environment(),
                                               "n_bootstrap": args.n_bootstrap, "seed": args.seed}

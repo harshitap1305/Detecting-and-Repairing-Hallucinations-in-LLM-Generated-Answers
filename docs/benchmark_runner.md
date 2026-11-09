@@ -2,7 +2,7 @@
 
 Increment 2 implements system execution and artifact validation. The separate
 [increment 3 scoring tools](independent_evaluation.md) handle metrics and human
-review; final report generation remains a later increment. `execution_complete` means all
+review; [increment 4](evaluation_bundles.md) packages reports and audited bundles. `execution_complete` means all
 requested system/record outputs exist, not that a scientific benchmark is complete.
 
 ## Inputs and preflight

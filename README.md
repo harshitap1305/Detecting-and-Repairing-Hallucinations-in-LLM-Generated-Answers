@@ -304,3 +304,10 @@ independent evaluation and final benchmark completion.
 now support complete runner artifacts. Corrected three-way detection metrics,
 answer-cluster confidence intervals, blinded repair review, adjudication, and
 Holm-adjusted paired comparisons run without provider credentials or new inference.
+
+[Generated task reports and result bundles](docs/evaluation_bundles.md) package
+saved executions and independent assessments for offline recomputation. Use
+`scripts/build_evaluation_report.py` to build a new bundle and
+`scripts/audit_baseline.py --bundle ... --gold ...` to verify it. Final repair
+reports require complete adjudicated reviews; progress reports show coverage
+without final performance claims. Historical tables remain unverified.

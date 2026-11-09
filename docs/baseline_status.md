@@ -44,3 +44,12 @@ misaligned. Pass `--checkpoint PATH --require-checkpoint` when checking a traine
 model as well. Presence of these files is only a prerequisite; reported metrics
 still need to be recomputed from them using the same configuration and code
 revision.
+
+
+## Versioned report bundles
+
+The legacy minimum-artifact command above remains available. New executions can
+be packaged and fully recomputed with the [bundle workflow](evaluation_bundles.md).
+Use `python scripts/audit_baseline.py --bundle PATH --gold EXACT_GOLD_JSONL` to
+verify a generated bundle. This tooling does not validate or replace the old
+numerical tables without the corresponding real experiment artifacts.

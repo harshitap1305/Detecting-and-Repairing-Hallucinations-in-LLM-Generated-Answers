@@ -2,7 +2,8 @@
 
 Status: preparation and [system execution](benchmark_runner.md) are implemented.
 Corrected scoring and [independent assessment tooling](independent_evaluation.md)
-are implemented. Human gold/reviews and final report generation remain outstanding.
+are implemented, along with [report generation and bundle auditing](evaluation_bundles.md).
+Human gold/reviews and measured pilot/test runs remain outstanding.
 The current numerical reports remain unverified.
 
 ## Configuration and sampling

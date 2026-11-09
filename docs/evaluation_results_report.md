@@ -1,5 +1,10 @@
 # Phase 8 Deliverable: Comprehensive Scientific Evaluation Report
 
+> **Historical unverified content:** This document is not generated from a
+> validated result bundle. For measured results, use the
+> [report-generation workflow](evaluation_bundles.md) and retain its audited
+> artifacts. Existing numbers below are not substituted into generated reports.
+
 > **Reproducibility status (7 November 2026):** The numerical results below are
 > not verifiable from artifacts tracked in this repository. Gold annotations,
 > per-record predictions, and populated split IDs are absent. Treat these values
