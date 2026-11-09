@@ -1,0 +1,33 @@
+# Preparation template. Add actual source paths, exact versions, and quotas
+# before sampling. Paths are relative to THIS file, not the shell directory.
+schema_version: 1
+seed: 42
+splits:
+  dev: 50
+  test: 100
+corpus:
+  snapshot: fever-wikipedia-2017
+  index_path: ../indexes/bm25_A.pkl
+segmentation:
+  backend: spacy
+  model: en_core_web_sm
+  version: "3.7.1"
+systems:
+  - {id: pipeline, tasks: [claim_verification, repair], retrieval: bm25}
+  - {id: b0, tasks: [repair], retrieval: none}
+  - {id: b1, tasks: [answer_detection], retrieval: none}
+  - {id: b2, tasks: [repair], retrieval: none}
+  - {id: b3, tasks: [repair], retrieval: none}
+  - {id: b4, tasks: [repair], retrieval: none}
+  - {id: b5, tasks: [repair], retrieval: bm25}
+  - {id: b6, tasks: [repair], retrieval: bm25, detector: pipeline_detector}
+  - {id: b7, tasks: [claim_verification, repair], retrieval: bm25}
+# Preserve processed records' original dev/test assignments. External test-only
+# benchmarks must have dev quota 0. Source IDs must equal source_dataset values.
+# Example (add other sources/quotas so totals equal splits above):
+# sources:
+#   - id: halueval
+#     path: ../data/processed/halueval.jsonl
+#     version: "<upstream revision and conversion commit>"
+#     quotas: {dev: 50, test: 100}
+sources: []

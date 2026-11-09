@@ -32,3 +32,6 @@ llm_cache.jsonl
 # Misc
 *.log
 .DS_Store
+
+# Private annotation packets and source text
+data/annotation_batches/

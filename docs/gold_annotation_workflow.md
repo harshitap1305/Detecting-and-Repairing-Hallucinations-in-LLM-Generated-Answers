@@ -97,3 +97,14 @@ The comparison fixes the same human claim inventory across all four systems.
 It still needs the actual checkpoints, index, and an LLM provider credential.
 Keep any gold files private until the team has reviewed dataset terms and
 decided whether to publish the annotations.
+
+## Deterministic annotation preparation
+
+Before labeling, use the [versioned evaluation protocol](evaluation_protocol.md)
+with `configs/evaluation.yaml` and `scripts/prepare_annotation_batch.py`. This
+selects candidate records using declared source quotas, preserves source splits,
+records hashes/exclusions, and exports blank canonical packets without passing
+through source labels or references. Review and freeze the shared claim inventory
+before issuing it to independent annotators. Prepared packets are not gold and
+will fail the final validator until human claims, verdicts, citations, and repairs
+are supplied.

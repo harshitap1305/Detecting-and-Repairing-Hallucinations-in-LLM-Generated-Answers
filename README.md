@@ -276,3 +276,21 @@ All settings live in [`configs/default.yaml`](configs/default.yaml). Key knobs:
 - [Factcheck-GPT / Factcheck-Bench](https://arxiv.org/abs/2311.09000) · [FAVA](https://arxiv.org/abs/2401.06855)
 - [HaluEval](https://arxiv.org/abs/2305.11747) · [FELM](https://arxiv.org/abs/2310.00741)
 - [FEVER](https://fever.ai) · [TruthfulQA](https://arxiv.org/abs/2109.07958)
+
+## Reproducible evaluation preparation
+
+The [evaluation protocol](docs/evaluation_protocol.md) defines tasks, native
+baseline capabilities, annotation handoff, and the planned scoring contract.
+Fill actual dataset paths, exact source versions, and per-source quotas in
+[`configs/evaluation.yaml`](configs/evaluation.yaml), then run:
+
+```bash
+python3 scripts/prepare_annotation_batch.py \
+  --config configs/evaluation.yaml \
+  --output-dir data/annotation_batches/v1
+```
+
+This exports deterministic blank annotation packets, prediction-safe inputs,
+split candidates, and a provenance manifest. Source dev/test assignments are
+preserved. It requires human annotation before any gold benchmark exists;
+experiment execution and final evaluation are later implementation increments.
