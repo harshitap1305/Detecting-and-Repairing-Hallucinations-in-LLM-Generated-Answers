@@ -1,11 +1,11 @@
 # Implementation plan: reproducible evaluation package
 
-Status: increments 1 and 2 implemented (protocol/configuration, capability
-registry, annotation preparation, shared validation, native adapters, and a
-resumable execution runner). Human annotation, corrected scoring, independent
-assessment, and final result bundles remain outstanding. Runner usage and
-limitations are documented in [benchmark execution](benchmark_runner.md). See
-[the protocol](evaluation_protocol.md) for the current handoff and limitations.
+Status: increments 1–3 implemented: preparation, resumable execution, corrected
+scoring, independent human review import/export and adjudication, and paired
+statistics. Human annotations/reviews and measured experiments are still required.
+Final report/bundle generation is increment 4. See [the protocol](evaluation_protocol.md),
+[benchmark execution](benchmark_runner.md), and
+[offline evaluation](independent_evaluation.md).
 
 ## Objective and boundaries
 

@@ -1,8 +1,8 @@
 # Execute and resume a benchmark
 
-Increment 2 implements system execution and artifact validation. It does not
-compute the corrected evaluation metrics, independent human assessments, or
-final report planned for later increments. `execution_complete` means all
+Increment 2 implements system execution and artifact validation. The separate
+[increment 3 scoring tools](independent_evaluation.md) handle metrics and human
+review; final report generation remains a later increment. `execution_complete` means all
 requested system/record outputs exist, not that a scientific benchmark is complete.
 
 ## Inputs and preflight
@@ -147,3 +147,11 @@ python3 -m unittest tests.test_benchmark_runner tests.test_evaluation_preparatio
 Live provider/model execution still requires real datasets, declared retrieval
 assets, installed segmenter/provider dependencies, and credentials. No live scores
 are supplied by this implementation.
+
+## Offline scoring and human review
+
+Increment 3 adds [offline evaluation and independent repair review](independent_evaluation.md).
+Use `scripts/run_eval.py --run-dir ... --gold ... --output ...` for complete saved
+runs and `scripts/review_repairs.py` for blinded human packets, rating imports,
+and adjudication. This does not change execution completion into a factual
+performance claim; independent ratings and the final report remain separate.

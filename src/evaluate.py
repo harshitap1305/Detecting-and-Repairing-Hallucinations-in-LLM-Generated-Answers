@@ -118,9 +118,9 @@ def compute_detection_metrics(
     predictions: List[str],
     ground_truth: List[str],
     positive_labels: Optional[List[str]] = None,
-) -> Dict[str, float]:
+) -> Dict[str, Any]:
     """
-    Compute Precision, Recall, and F1 for binary/multi-class claim verification.
+    Compute explicitly separate binary and three-way claim verification metrics.
     Default positive class = {'Contradicted', 'Unverifiable'} (hallucinated).
     """
     if positive_labels is None:
@@ -128,6 +128,11 @@ def compute_detection_metrics(
     if len(predictions) != len(ground_truth):
         raise ValueError("Predictions and ground truth must have the same length.")
 
+    labels = ("Supported", "Contradicted", "Unverifiable")
+    if any(label not in labels for label in predictions + ground_truth):
+        raise ValueError("Unknown or missing claim verdict")
+    if any(label not in labels for label in positive_labels):
+        raise ValueError("Unknown positive label")
     tp = fp = fn = tn = 0
     for pred, gold in zip(predictions, ground_truth):
         pred_pos = pred in positive_labels
@@ -147,7 +152,7 @@ def compute_detection_metrics(
     f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
     accuracy = (tp + tn) / len(predictions) if predictions else 0.0
 
-    return {
+    binary = {
         "tp": tp,
         "fp": fp,
         "fn": fn,
@@ -157,6 +162,97 @@ def compute_detection_metrics(
         "f1": float(f1),
         "accuracy": float(accuracy),
     }
+
+    matrix = [[sum(g == actual and p == predicted for g, p in zip(ground_truth, predictions))
+               for predicted in labels] for actual in labels]
+    per_class = {}
+    for i, label in enumerate(labels):
+        support = sum(matrix[i])
+        predicted = sum(row[i] for row in matrix)
+        precision_i = matrix[i][i] / predicted if predicted else 0.0
+        recall_i = matrix[i][i] / support if support else 0.0
+        per_class[label] = {"precision": precision_i, "recall": recall_i,
+                            "f1": 2 * precision_i * recall_i / (precision_i + recall_i)
+                            if precision_i + recall_i else 0.0, "support": support}
+    three_way = {"accuracy": sum(matrix[i][i] for i in range(3)) / len(predictions)
+                 if predictions else 0.0,
+                 "macro_f1": sum(value["f1"] for value in per_class.values()) / 3,
+                 "per_class": per_class,
+                 "confusion_matrix": {"labels": list(labels), "rows_gold_columns_pred": matrix},
+                 "zero_division": 0, "n_claims": len(predictions)}
+    # Preserve old binary keys for callers; new reports use the named sections.
+    return {**binary, "binary": binary, "three_way": three_way}
+
+
+def unique_records(records: List[AnswerRecord]) -> dict:
+    result = {}
+    for record in records:
+        if not isinstance(record.id, str) or not record.id.strip() or record.id in result:
+            raise ValueError("Duplicate or empty record ID")
+        result[record.id] = record
+    if not result:
+        raise ValueError("Record list must be nonempty")
+    return result
+
+
+def align_claim_records(records, gold_records):
+    """Require exact record identities and human claim inventories before scoring."""
+    predictions, golds = unique_records(records), unique_records(gold_records)
+    if predictions.keys() != golds.keys():
+        raise ValueError("Prediction and gold record IDs must match exactly")
+    groups = []
+    seen = {"predicted": set(), "gold": set()}
+    for record_id in sorted(golds):
+        record, gold = predictions[record_id], golds[record_id]
+        if any(getattr(record, field) != getattr(gold, field) for field in
+               ("source_dataset", "split", "question", "answer")):
+            raise ValueError(f"Prediction/gold input mismatch: {record_id}")
+        inventories = []
+        for name, item in (("predicted", record), ("gold", gold)):
+            claims = {}
+            for claim in item.claims:
+                if not isinstance(claim.id, str) or not claim.id.strip() or claim.id in seen[name]:
+                    raise ValueError("Duplicate or empty claim ID")
+                if type(claim.check_worthy) is not bool:
+                    raise ValueError("check_worthy must be boolean")
+                seen[name].add(claim.id)
+                claims[claim.id] = claim
+            inventories.append(claims)
+        if inventories[0].keys() != inventories[1].keys():
+            raise ValueError(f"Incomplete claim inventory: {record_id}")
+        pairs = []
+        for claim_id in sorted(inventories[1]):
+            pred, actual = (inventory[claim_id] for inventory in inventories)
+            if any(getattr(pred, field) != getattr(actual, field) for field in
+                   ("text", "sentence_id", "span", "check_worthy")):
+                raise ValueError(f"Changed claim inventory: {claim_id}")
+            if actual.check_worthy:
+                if pred.label not in ("Supported", "Contradicted", "Unverifiable") or actual.label not in (
+                        "Supported", "Contradicted", "Unverifiable"):
+                    raise ValueError("Missing/invalid check-worthy verdict")
+                pairs.append((pred.label, actual.label))
+        if not pairs:
+            raise ValueError(f"No check-worthy claims: {record_id}")
+        groups.append(pairs)
+    return groups
+
+
+def evaluate_claim_detection(records, gold_records, n_bootstrap=1000, seed=42):
+    from src.experiments.statistics import clustered_interval
+    groups = align_claim_records(records, gold_records)
+    def metric(sample):
+        pairs = [pair for group in sample for pair in group]
+        return compute_detection_metrics([pair[0] for pair in pairs], [pair[1] for pair in pairs])
+    result = metric(groups)
+    result["coverage"] = {"records": len(groups), "expected_records": len(gold_records),
+                          "claims": sum(map(len, groups)), "fraction": 1.0}
+    result["intervals"] = {
+        "three_way_macro_f1": clustered_interval(groups, lambda sample: metric(sample)["three_way"]["macro_f1"],
+                                                 n_bootstrap, seed),
+        "binary_f1": clustered_interval(groups, lambda sample: metric(sample)["binary"]["f1"],
+                                         n_bootstrap, seed),
+    }
+    return result
 
 
 # ─── 3. FActScore-style Supported Claim Ratio (SCR) ──────────────────────────
@@ -224,6 +320,10 @@ def bootstrap_confidence_interval(
     Compute mean and 95% bootstrap confidence interval using the percentile method.
     Returns: (mean, ci_lower, ci_upper)
     """
+    if type(n_bootstrap) is not int or n_bootstrap < 1 or not 0 < ci < 1:
+        raise ValueError("Positive bootstrap count and confidence in (0,1) required")
+    if any(not np.isfinite(value) for value in scores):
+        raise ValueError("Bootstrap scores must be finite")
     if not scores:
         return 0.0, 0.0, 0.0
     if len(scores) == 1:
@@ -259,58 +359,8 @@ def paired_wilcoxon_test(
     if len(system_scores) != len(baseline_scores):
         raise ValueError("System and baseline scores must have identical length for paired testing.")
 
-    diffs = [s - b for s, b in zip(system_scores, baseline_scores)]
-    non_zeros = [d for d in diffs if abs(d) > 1e-9]
-
-    if len(non_zeros) < 5:
-        # Not enough differing pairs for asymptotic/normal approximation
-        mean_diff = float(np.mean(diffs)) if diffs else 0.0
-        return {
-            "statistic": 0.0,
-            "p_value": 1.0,
-            "is_significant_p05": False,
-            "mean_difference": mean_diff,
-            "note": "Fewer than 5 differing pairs",
-        }
-
-    try:
-        from scipy.stats import wilcoxon
-        res = wilcoxon(system_scores, baseline_scores, alternative="two-sided")
-        stat = float(res.statistic)
-        p_val = float(res.pvalue)
-    except Exception:
-        # Fallback ranking logic if scipy is unavailable
-        abs_diffs = [(abs(d), i, d > 0) for i, d in enumerate(non_zeros)]
-        abs_diffs.sort(key=lambda x: x[0])
-        n = len(abs_diffs)
-        ranks = [0.0] * n
-        i = 0
-        while i < n:
-            j = i
-            while j < n and abs(abs_diffs[j][0] - abs_diffs[i][0]) < 1e-9:
-                j += 1
-            avg_rank = (i + 1 + j) / 2.0
-            for k in range(i, j):
-                ranks[k] = avg_rank
-            i = j
-
-        w_plus = sum(ranks[k] for k in range(n) if abs_diffs[k][2])
-        w_minus = sum(ranks[k] for k in range(n) if not abs_diffs[k][2])
-        stat = min(w_plus, w_minus)
-        # Normal approximation for large N
-        mean_w = n * (n + 1) / 4.0
-        std_w = math.sqrt(n * (n + 1) * (2 * n + 1) / 24.0)
-        z = (stat - mean_w) / (std_w if std_w > 0 else 1.0)
-        # Two-sided p-value approximation
-        p_val = float(2.0 * (1.0 - 0.5 * (1.0 + math.erf(abs(z) / math.sqrt(2.0)))))
-
-    mean_diff = float(np.mean(diffs))
-    return {
-        "statistic": float(stat),
-        "p_value": float(p_val),
-        "is_significant_p05": bool(p_val < 0.05),
-        "mean_difference": mean_diff,
-    }
+    from src.experiments.statistics import signed_rank
+    return signed_rank(system_scores, baseline_scores)
 
 
 # ─── 6. Independent Evaluator (LLM-B) ────────────────────────────────────────
@@ -437,22 +487,14 @@ def evaluate_dataset(
 
     # 5. Detection metrics against gold (if gold records provided)
     detection_results = None
-    if gold_records:
-        gold_map = {g.id: g for g in gold_records}
-        preds = []
-        golds = []
-        for r in records:
-            if r.id in gold_map:
-                g_rec = gold_map[r.id]
-                g_claims = {gc.id: gc.label for gc in g_rec.claims if gc.label}
-                for c in r.claims:
-                    if c.id in g_claims:
-                        preds.append(c.label or "Unverifiable")
-                        golds.append(g_claims[c.id])
-        if preds and golds:
-            detection_results = compute_detection_metrics(preds, golds)
+    unique_records(records)
+    if gold_records is not None:
+        detection_results = evaluate_claim_detection(records, gold_records, n_bootstrap, seed)
 
     return {
+        "metric_notes": {"scr": "system self-verification diagnostic",
+                         "preservation_rate": "token-overlap diagnostic; not semantic preservation",
+                         "lexical_similarity": "similarity to original answer; not factual correctness"},
         "n_records": len(records),
         "total_claims": total_claims,
         "check_worthy_claims": total_cw,

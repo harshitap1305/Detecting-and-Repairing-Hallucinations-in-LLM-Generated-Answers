@@ -32,12 +32,53 @@ def load_jsonl(path: str) -> list[AnswerRecord]:
     return records
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description="Evaluate pipeline results")
-    parser.add_argument("--results", required=True, help="Path to pipeline output JSONL")
+    parser.add_argument("--results", help="Path to pipeline output JSONL")
     parser.add_argument("--gold", default=None, help="Path to gold dataset JSONL (optional)")
     parser.add_argument("--n_bootstrap", type=int, default=1000, help="Number of bootstrap iterations")
-    args = parser.parse_args()
+    parser.add_argument("--run-dir", type=Path, help="Offline score a complete benchmark runner directory")
+    parser.add_argument("--assessments", type=Path, help="Imported/adjudicated human review JSON")
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--seed", type=int, default=42)
+    args = parser.parse_args(argv)
+    if args.run_dir:
+        from src.experiments.scoring import load_gold, load_run, score_run
+        from src.experiments.assessment import validate_assessments, score_assessments
+        from src.experiments.artifacts import canonical, file_hash
+        try:
+            if args.results or not args.gold or not args.output or args.output.exists():
+                raise ValueError("Runner scoring requires --gold and a new --output, without --results")
+            gold = load_gold(Path(args.gold))
+            run = load_run(args.run_dir, gold)
+            metrics = score_run(run, gold, args.n_bootstrap, args.seed)
+            if args.assessments:
+                if metrics["task"] != "repair":
+                    raise ValueError("Repair assessments apply only to repair runs")
+                ratings = validate_assessments(json.loads(args.assessments.read_text()), run, gold)
+                metrics["human_repair"] = score_assessments(ratings, gold, args.n_bootstrap, args.seed)
+                metrics["assessment_status"] = "adjudicated" if ratings.get("adjudicated") else "single_reviewer"
+                for system in metrics["systems"]:
+                    metrics["systems"][system]["independent_repair"] = {
+                        "status": "available", "assessment_status": metrics["assessment_status"],
+                        **metrics["human_repair"]["systems"][system]}
+
+            from src.experiments.runner import code_identity, environment
+            metrics["scoring_provenance"] = {"code": code_identity(), "environment": environment(),
+                                              "n_bootstrap": args.n_bootstrap, "seed": args.seed}
+            metrics["provenance"] = {"gold_sha256": file_hash(Path(args.gold)),
+                                     "manifest_sha256": run["manifest_sha256"],
+                                     "assessments_sha256": file_hash(args.assessments) if args.assessments else None}
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            with args.output.open("xb") as stream:
+                stream.write(canonical(metrics) + b"\n")
+            print(f"Offline metrics saved: {args.output}")
+            return 0
+        except (OSError, ValueError, KeyError, TypeError, ImportError) as exc:
+            print(f"Evaluation failed: {exc}", file=sys.stderr)
+            return 1
+    if not args.results or args.assessments or args.output:
+        parser.error("Use --run-dir for saved benchmark scoring, or --results for legacy diagnostics")
 
     results_path = Path(args.results)
     if not results_path.exists():
@@ -55,7 +96,14 @@ def main():
         print(f" Gold Reference: {len(gold_records)} gold records")
     print(f"=======================================================")
 
-    metrics = evaluate_dataset(records, gold_records=gold_records, n_bootstrap=args.n_bootstrap)
+    try:
+        metrics = evaluate_dataset(records, gold_records=gold_records, n_bootstrap=args.n_bootstrap, seed=args.seed)
+    except (ValueError, KeyError, TypeError) as exc:
+        print(f"Evaluation failed: {exc}", file=sys.stderr)
+        return 1
+    if "error" in metrics:
+        print(metrics["error"], file=sys.stderr)
+        return 1
 
     print("\nClaim Statistics:")
     print(f"  Total claims:        {metrics['total_claims']}")
@@ -66,14 +114,14 @@ def main():
         print(f"    - {lbl:15s}: {cnt:5d} ({pct:5.1f}%)")
 
     scr = metrics["scr"]
-    print("\nSupported Claim Ratio (SCR / FActScore) Progression [95% CI]:")
+    print("\nSelf-verification SCR diagnostic [95% CI]:")
     print(f"  SCR BEFORE: {scr['before']['mean']:.4f} [{scr['before']['ci_lower']:.4f}, {scr['before']['ci_upper']:.4f}]")
     print(f"  SCR AFTER:  {scr['after']['mean']:.4f} [{scr['after']['ci_lower']:.4f}, {scr['after']['ci_upper']:.4f}]")
     print(f"  SCR DELTA:  {scr['delta']['mean']:+.4f} [{scr['delta']['ci_lower']:+.4f}, {scr['delta']['ci_upper']:+.4f}]")
 
     pres = metrics["preservation_rate"]
     oe = metrics["over_edit_rate"]
-    print("\nPreservation & Localization Guard Performance [95% CI]:")
+    print("\nToken-overlap preservation diagnostic [95% CI]:")
     print(f"  Preservation Rate: {pres['mean'] * 100:.2f}% [{pres['ci_lower'] * 100:.2f}%, {pres['ci_upper'] * 100:.2f}%]")
     print(f"  Over-edit Rate:    {oe['mean'] * 100:.2f}% [{oe['ci_lower'] * 100:.2f}%, {oe['ci_upper'] * 100:.2f}%]")
 
@@ -85,11 +133,12 @@ def main():
 
     if metrics.get("detection_vs_gold"):
         det = metrics["detection_vs_gold"]
-        print("\nClaim-level Detection vs. Gold:")
+        print("\nBinary hallucination detection vs. Gold:")
+        print(f"  Three-way Macro-F1: {det['three_way']['macro_f1']:.4f}")
         print(f"  Precision: {det['precision']:.4f} | Recall: {det['recall']:.4f} | F1: {det['f1']:.4f} | Accuracy: {det['accuracy']:.4f}")
 
     print(f"=======================================================\n")
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -38,3 +38,6 @@ data/annotation_batches/
 
 # Private benchmark attempts and raw LLM traces
 results/evaluation/
+
+# Private blinded ratings, adjudication, and identity mappings
+data/review_batches/

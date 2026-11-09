@@ -1,8 +1,8 @@
 # Reproducible evaluation protocol (version 1)
 
 Status: preparation and [system execution](benchmark_runner.md) are implemented.
-Human gold, independent assessment, corrected scoring, and final report generation
-are subsequent milestones.
+Corrected scoring and [independent assessment tooling](independent_evaluation.md)
+are implemented. Human gold/reviews and final report generation remain outstanding.
 The current numerical reports remain unverified.
 
 ## Configuration and sampling
@@ -131,8 +131,10 @@ setup: curators must use the same installed model for gold validation.
 
 ## Metrics, independent review, and test discipline
 
-The following is the contract for subsequent evaluation implementation, not a
-claim that the current metrics module implements these checks:
+The [offline scoring tools](independent_evaluation.md) implement this contract;
+legacy self-scores remain explicitly diagnostic. Primary repair rates are means
+of per-answer rates over answers with eligible original claims, with eligibility
+counts reported. Actual independent assessments must be supplied by humans:
 
 - Primary claim metric: three-way macro-F1 on complete fixed inventories.
   Bootstrap answers, keeping their claims together; report 95% percentile
@@ -150,7 +152,9 @@ claim that the current metrics module implements these checks:
   Model-judge assistance is separate and records model, evidence, and rubric.
 - Compare every repair system with B0 on the two primary repair outcomes. Treat
   these comparisons as one multiplicity family. Claim-verification comparisons
-  against the prompted pipeline are a separate family. If reporting p-values,
+  against the prompted pipeline are a separate family. Primary detection
+  differences bootstrap pooled macro-F1; secondary signed-rank tests target
+  per-answer macro-F1, which is a different estimand. If reporting p-values,
   use paired tests with explicit tie/degenerate handling, SciPy, and Holm
   correction. Require exact paired IDs and report missing assessments as missing.
 

@@ -36,6 +36,8 @@ def load_records(path: str) -> Dict[str, AnswerRecord]:
             line = line.strip()
             if line:
                 rec = AnswerRecord.from_jsonl_line(line)
+                if rec.id in records:
+                    raise ValueError(f"Duplicate record ID: {rec.id}")
                 records[rec.id] = rec
     return records
 
@@ -53,18 +55,24 @@ def format_p_value(p: float) -> str:
     return f"{p:.4e} {stars}"
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description="Paired statistical tests between two systems")
     parser.add_argument("--system", required=True, help="Path to system output JSONL")
     parser.add_argument("--baseline", required=True, help="Path to baseline output JSONL")
     parser.add_argument("--output", default=None, help="Optional output JSON path")
     parser.add_argument("--n_bootstrap", type=int, default=1000)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     sys_records = load_records(args.system)
     base_records = load_records(args.baseline)
 
-    common_ids = sorted(set(sys_records.keys()) & set(base_records.keys()))
+    if sys_records.keys() != base_records.keys():
+        parser.error("System and baseline IDs must match exactly; partial intersections are invalid")
+    for record_id in sys_records:
+        if any(getattr(sys_records[record_id], field) != getattr(base_records[record_id], field)
+               for field in ("source_dataset", "split", "question", "answer")):
+            parser.error(f"Paired input mismatch: {record_id}")
+    common_ids = sorted(sys_records)
     if not common_ids:
         print(f"Error: No overlapping record IDs found between {args.system} and {args.baseline}")
         sys.exit(1)
@@ -112,8 +120,8 @@ def main():
     }
 
     # 3. ROUGE-L F1 (Lexical similarity to original answer)
-    sys_rouge = [compute_rouge_l(sys_records[i].repaired_answer or sys_records[i].answer, sys_records[i].answer)["f1"] for i in common_ids]
-    base_rouge = [compute_rouge_l(base_records[i].repaired_answer or base_records[i].answer, base_records[i].answer)["f1"] for i in common_ids]
+    sys_rouge = [compute_rouge_l(sys_records[i].repaired_answer if sys_records[i].repaired_answer is not None else sys_records[i].answer, sys_records[i].answer)["f1"] for i in common_ids]
+    base_rouge = [compute_rouge_l(base_records[i].repaired_answer if base_records[i].repaired_answer is not None else base_records[i].answer, base_records[i].answer)["f1"] for i in common_ids]
     rouge_wilcoxon = paired_wilcoxon_test(sys_rouge, base_rouge)
     rouge_diff_mean, rouge_diff_low, rouge_diff_high = bootstrap_confidence_interval(
         [s - b for s, b in zip(sys_rouge, base_rouge)], n_bootstrap=args.n_bootstrap
@@ -128,12 +136,17 @@ def main():
         "significant": rouge_wilcoxon["is_significant_p05"],
     }
 
+    from src.experiments.statistics import holm_adjust
+    for metric, adjusted in zip(metrics.values(), holm_adjust([m["p_value"] for m in metrics.values()])):
+        metric["p_value_holm"] = adjusted
+        metric["significant_holm_p05"] = adjusted < 0.05
+    print("Legacy diagnostics only; not independent factual repair measurements.")
     # Display results table
-    print(f"\n{'Metric':<18} | {'System':<8} | {'Baseline':<8} | {'Diff [95% CI]':<22} | {'Wilcoxon p-value'}")
+    print(f"\n{'Metric':<18} | {'System':<8} | {'Baseline':<8} | {'Diff [95% CI]':<22} | {'Holm-adjusted p-value'}")
     print("-" * 80)
     for name, m in metrics.items():
         ci_str = f"{m['mean_difference']:+.3f} [{m['ci_95'][0]:+.3f}, {m['ci_95'][1]:+.3f}]"
-        print(f"{name:<18} | {m['system_mean']:<8.4f} | {m['baseline_mean']:<8.4f} | {ci_str:<22} | {format_p_value(m['p_value'])}")
+        print(f"{name:<18} | {m['system_mean']:<8.4f} | {m['baseline_mean']:<8.4f} | {ci_str:<22} | {format_p_value(m['p_value_holm'])}")
     print("=" * 80 + "\n")
 
     if args.output:

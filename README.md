@@ -299,3 +299,8 @@ The [benchmark runner](docs/benchmark_runner.md) executes the configured systems
 with isolated inputs, native output envelopes, request traces, immutable attempts,
 and identity-checked resume. Its `execution_complete` status is separate from
 independent evaluation and final benchmark completion.
+
+[Offline scoring and independent human review](docs/independent_evaluation.md)
+now support complete runner artifacts. Corrected three-way detection metrics,
+answer-cluster confidence intervals, blinded repair review, adjudication, and
+Holm-adjusted paired comparisons run without provider credentials or new inference.
