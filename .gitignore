@@ -35,3 +35,6 @@ llm_cache.jsonl
 
 # Private annotation packets and source text
 data/annotation_batches/
+
+# Private benchmark attempts and raw LLM traces
+results/evaluation/

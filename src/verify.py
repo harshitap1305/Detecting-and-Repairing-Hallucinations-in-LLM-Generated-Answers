@@ -25,6 +25,7 @@ from typing import Dict, List, Optional, Tuple
 
 from src.schema import AnswerRecord, Claim, VerdictLabel
 import src.llm as llm
+from src.experiments.runtime import strict
 
 
 # ─── Calibrated Thresholds Loader ─────────────────────────────────────────────
@@ -187,9 +188,14 @@ def _parse_verdict(response: str) -> Tuple[VerdictLabel, str, List[int]]:
     cleaned = re.sub(r"```(?:json)?", "", response).strip()
     match = re.search(r"\{.*\}", cleaned, re.DOTALL)
     if not match:
+        if strict.get():
+            raise ValueError("Malformed verifier JSON")
         return "Unverifiable", "Could not parse JSON response from LLM judge.", []
     try:
         d = json.loads(match.group())
+        if strict.get() and (not isinstance(d, dict) or d.get("label") not in
+                             ("Supported", "Contradicted", "Unverifiable")):
+            raise ValueError("Invalid verifier label")
         lbl = d.get("label", "Unverifiable")
         if lbl not in ("Supported", "Contradicted", "Unverifiable"):
             lbl = "Unverifiable"
@@ -197,6 +203,8 @@ def _parse_verdict(response: str) -> Tuple[VerdictLabel, str, List[int]]:
         supporting_ids = d.get("supporting_passage_ids", [])
         return lbl, rationale, supporting_ids
     except Exception:
+        if strict.get():
+            raise
         return "Unverifiable", "Malformed JSON from judge.", []
 
 

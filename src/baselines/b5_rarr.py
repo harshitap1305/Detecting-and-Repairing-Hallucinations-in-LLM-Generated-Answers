@@ -9,6 +9,7 @@ Retrofit Attribution using Research and Revision:
 from __future__ import annotations
 
 import re
+from src.experiments.runtime import strict
 from typing import List, Optional
 
 from src.llm import call as llm_call
@@ -50,6 +51,8 @@ def run_b5(
         try:
             passages = retrieve_bm25(query, index_path, top_k=top_k)
         except Exception:
+            if strict.get():
+                raise
             passages = []
 
     if passages:

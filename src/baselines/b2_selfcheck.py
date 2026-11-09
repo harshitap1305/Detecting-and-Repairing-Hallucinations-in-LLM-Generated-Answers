@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import re
+from src.experiments.runtime import strict
 from typing import Callable, List, Optional
 
 from src.decompose import split_sentences
@@ -71,6 +72,8 @@ def generate_stochastic_samples(
         ).strip()
         if sample:
             samples.append(sample)
+    if strict.get() and len(samples) != n_samples:
+        raise ValueError("Incomplete SelfCheck sample set")
     return samples
 
 
@@ -85,6 +88,8 @@ def evaluate_sentence_consistency(
     Higher = more consistent (less hallucinated).
     """
     if not samples:
+        if strict.get():
+            raise ValueError("No SelfCheck samples generated")
         return 0.5
 
     samples_formatted = "\n\n".join(f"[Sample {i + 1}]: {s}" for i, s in enumerate(samples))
@@ -102,6 +107,10 @@ def evaluate_sentence_consistency(
     if match:
         try:
             data = json.loads(match.group())
+            if strict.get() and (data.get("verdict") not in ("Consistent", "Inconsistent")
+                    or type(data.get("score")) not in (int, float)
+                    or not 0 <= data["score"] <= 1):
+                raise ValueError("Invalid consistency score")
             verdict = data.get("verdict", "").lower()
             score = float(data.get("score", 0.5))
             if "inconsistent" in verdict and score > 0.5:
@@ -111,6 +120,8 @@ def evaluate_sentence_consistency(
         except Exception:
             pass
 
+    if strict.get():
+        raise ValueError("Malformed consistency verdict")
     # Fallback lexical overlap if JSON parsing fails
     sent_tokens = set(sentence.lower().split())
     if not sent_tokens:
@@ -127,6 +138,7 @@ def run_b2(
     model: str = "llama-3.3-70b-versatile",
     provider: str = "groq",
     samples: Optional[List[str]] = None,
+    score_report: Optional[dict] = None,
 ) -> AnswerRecord:
     """
     Run Baseline B2 (SelfCheckGPT) on an AnswerRecord.
@@ -167,5 +179,10 @@ def run_b2(
     # Estimate reliability score from mean consistency
     mean_score = sum(consistency_scores) / len(consistency_scores) if consistency_scores else 0.5
     record.reliability_score_after = mean_score
+    if score_report is not None:
+        score_report.update(mean_sentence_consistency=mean_score,
+                            sentence_consistency=[{"sentence_id": sid, "sentence": sentence,
+                                                   "score": consistency_scores[sid]}
+                                                  for sid, sentence in enumerate(sentences)])
     return record
 

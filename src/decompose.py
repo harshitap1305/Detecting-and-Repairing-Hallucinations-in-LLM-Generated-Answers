@@ -29,6 +29,7 @@ from typing import List, Optional, Tuple
 
 from src.schema import AnswerRecord, Claim
 import src.llm as llm
+from src.experiments.runtime import strict
 
 # ─── spaCy with regex fallback ────────────────────────────────────────────────
 
@@ -309,6 +310,15 @@ def decompose(
         if attempt == max_retries - 1:
             print(f"[decompose] ⚠ JSON parse failed for record {record.id} after {max_retries} attempts.")
 
+    if strict.get() and not raw_claims:
+        raise ValueError("Decomposition returned no valid claim inventory")
+    if strict.get():
+        for item in raw_claims:
+            if (not isinstance(item, dict) or not isinstance(item.get("claim"), str)
+                    or not item["claim"].strip() or type(item.get("sentence_id")) is not int
+                    or not 0 <= item["sentence_id"] < len(sentence_spans)
+                    or type(item.get("check_worthy")) is not bool):
+                raise ValueError("Malformed decomposition claim fields")
     claims: List[Claim] = []
     for i, rc in enumerate(raw_claims):
         if not isinstance(rc, dict):

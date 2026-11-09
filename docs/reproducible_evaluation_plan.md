@@ -1,8 +1,10 @@
 # Implementation plan: reproducible evaluation package
 
-Status: increment 1 implemented (protocol/configuration, capability registry,
-and deterministic blank annotation preparation). Human annotation, runners,
-scoring, and result bundles remain outstanding. See
+Status: increments 1 and 2 implemented (protocol/configuration, capability
+registry, annotation preparation, shared validation, native adapters, and a
+resumable execution runner). Human annotation, corrected scoring, independent
+assessment, and final result bundles remain outstanding. Runner usage and
+limitations are documented in [benchmark execution](benchmark_runner.md). See
 [the protocol](evaluation_protocol.md) for the current handoff and limitations.
 
 ## Objective and boundaries

@@ -1,0 +1,60 @@
+"""Native baseline adapters. Gold never enters this layer."""
+from __future__ import annotations
+
+from dataclasses import asdict
+from src.schema import AnswerRecord
+
+
+def execute(system: dict, record: AnswerRecord, task: str, options: dict) -> dict:
+    from src.baselines import run_b0, run_b1, run_b2, run_b3, run_b4, run_b5, run_b6, run_b7
+    from src.pipeline import run_pipeline
+    from src.retrieve import retrieve_bm25
+
+    name = system["id"]
+    common = {"model": options["model"], "provider": options["provider"]}
+    native = {}
+    evidence = []
+    pipeline_options = {
+        "llm_model": options["model"], "provider": options["provider"],
+        "verifier": options["verifier"], "index_path": options["index_path"],
+        "retriever_method": system["retrieval"], "top_k": options["top_k"],
+        "faiss_index_path": options.get("faiss_index_path"),
+        "passages_path": options.get("passages_path"),
+        "repair_policy": options["repair_policy"],
+        "use_existing_claims": task == "claim_verification",
+        "max_repair_iterations": options["max_repair_iterations"] if task == "repair" else 0,
+    }
+    if name in ("pipeline", "b6"):
+        if name == "b6":
+            pipeline_options["max_repair_iterations"] = 0
+        record = run_pipeline(record, **pipeline_options)
+        native["self_verification_scr"] = {
+            "before": record.reliability_score_before, "after": record.reliability_score_after}
+        if name == "b6":
+            record = run_b6(record)
+            native = {"detector_self_verification_scr": record.reliability_score_before}
+    elif name == "b0":
+        record = run_b0(record)
+    elif name == "b1":
+        native["answer_detection"] = run_b1(record, **common)
+    elif name == "b2":
+        record = run_b2(record, n_samples=options["n_samples"],
+                        threshold=options["consistency_threshold"], score_report=native, **common)
+        native["mean_sentence_consistency"] = record.reliability_score_after
+        # Keep native consistency out of fields conventionally used as factual SCR.
+        record.reliability_score_after = None
+    elif name == "b3":
+        record = run_b3(record, **common)
+    elif name == "b4":
+        record = run_b4(record, **common)
+    elif name == "b5":
+        passages = retrieve_bm25(f"{record.question} {record.answer}", options["index_path"],
+                                 top_k=options["top_k"])
+        record = run_b5(record, passages=passages, **common)
+        evidence = [asdict(passage) for passage in passages]
+    elif name == "b7":
+        record = run_b7(record, index_path=options["index_path"], top_k=options["top_k"],
+                        revise=task == "repair", **common)
+    else:
+        raise ValueError(f"Unsupported system: {name}")
+    return {"record": record.to_dict(), "native": native, "retrieved_evidence": evidence}

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import re
+from src.experiments.runtime import strict
 from typing import List, Optional
 
 from src.decompose import decompose
@@ -67,11 +68,16 @@ def classify_claim_stance(
     if match:
         try:
             data = json.loads(match.group())
+            if strict.get() and (not isinstance(data, dict) or data.get("stance") not in
+                                 ("Support", "Refute", "Not enough info")):
+                raise ValueError("Invalid B7 stance")
             stance = data.get("stance", "Not enough info")
             if stance in ("Support", "Refute", "Not enough info"):
                 return stance
         except Exception:
             pass
+    if strict.get():
+        raise ValueError("Malformed B7 stance verdict")
     return "Not enough info"
 
 
@@ -81,6 +87,7 @@ def run_b7(
     top_k: int = 5,
     model: str = "llama-3.3-70b-versatile",
     provider: str = "groq",
+    revise: bool = True,
 ) -> AnswerRecord:
     """
     Run Factcheck-GPT baseline on an AnswerRecord.
@@ -96,6 +103,8 @@ def run_b7(
             try:
                 claim.evidence = retrieve_bm25(claim.text, index_path, top_k=top_k)
             except Exception:
+                if strict.get():
+                    raise
                 claim.evidence = []
 
         stance = classify_claim_stance(claim.text, claim.evidence, model=model, provider=provider)
@@ -108,6 +117,9 @@ def run_b7(
             claim.label = "Unverifiable"
 
         findings.append(f"- Claim: \"{claim.text}\" -> Stance: {stance}")
+
+    if not revise:
+        return record
 
     # 3. Direct un-guarded revision
     findings_text = "\n".join(findings) if findings else "(No specific claim findings)"

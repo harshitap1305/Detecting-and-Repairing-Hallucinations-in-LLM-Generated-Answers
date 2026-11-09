@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+from src.experiments.runtime import strict
 from typing import List, Tuple
 
 from src.llm import call as llm_call
@@ -63,11 +64,16 @@ def generate_verification_questions(
     if match:
         try:
             questions = json.loads(match.group())
+            if strict.get() and (not isinstance(questions, list) or not questions
+                    or any(not isinstance(q, str) or not q.strip() for q in questions)):
+                raise ValueError("Invalid verification questions")
             if isinstance(questions, list):
                 return [str(q).strip() for q in questions if str(q).strip()]
         except Exception:
             pass
 
+    if strict.get():
+        raise ValueError("Malformed verification questions")
     # Fallback heuristic: split lines
     lines = [
         re.sub(r"^\d+[\.\)]\s*", "", line).strip()

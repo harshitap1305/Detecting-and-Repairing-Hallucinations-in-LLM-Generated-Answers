@@ -6,7 +6,7 @@ Supports:
   - OpenAI API (set OPENAI_API_KEY)
   - Local HuggingFace model via transformers pipeline
 
-Cache key = SHA-256 of (model, prompt, temperature, max_tokens, seed).
+Cache key includes provider, endpoint, model, prompt, sampling settings, and seed.
 On cache hit → return stored response, no API call, no cost.
 
 Usage:
@@ -29,6 +29,8 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Optional
 
+from src.experiments.runtime import recorder, run_seed, strict, bypass_cache, model_revision
+
 
 # ─── Cache ────────────────────────────────────────────────────────────────────
 
@@ -37,13 +39,24 @@ def _cache_path() -> str:
 
 
 def _make_key(model: str, prompt: str, temperature: float,
-              max_tokens: int, seed: int) -> str:
+              max_tokens: int, seed: int, provider: str = "groq",
+              endpoint: Optional[str] = None) -> str:
     payload = json.dumps(
-        {"model": model, "prompt": prompt, "temperature": temperature,
-         "max_tokens": max_tokens, "seed": seed},
+        {"cache_schema": 2, "provider": provider, "endpoint": endpoint or endpoint_identity(provider),
+         "model": model, "prompt": prompt, "temperature": temperature,
+         "max_tokens": max_tokens, "seed": seed,
+         "revision": model_revision.get() if provider == "local" else None},
         sort_keys=True,
     )
     return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def endpoint_identity(provider: str) -> str:
+    if provider == "groq":
+        return os.environ.get("GROQ_BASE_URL", "https://api.groq.com")
+    if provider == "openai":
+        return os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
+    return "local-transformers"
 
 
 def _init_db(db_path: str) -> sqlite3.Connection:
@@ -58,14 +71,17 @@ def _init_db(db_path: str) -> sqlite3.Connection:
 
 # Module-level connection (lazy init, one per process)
 _conn: Optional[sqlite3.Connection] = None
+_conn_path: Optional[str] = None
 
 
 def _get_conn() -> sqlite3.Connection:
-    global _conn
+    global _conn, _conn_path
     db_path = _cache_path()
     # Reinitialise if path changed (e.g. Colab sets env var after import)
-    if _conn is None:
+    if _conn is None or _conn_path != db_path:
+        reset_connection()
         _conn = _init_db(db_path)
+        _conn_path = db_path
     return _conn
 
 
@@ -110,7 +126,7 @@ def _call_groq(model: str, prompt: str, temperature: float,
                max_tokens: int, seed: int) -> str:
     """Call Groq API. Requires GROQ_API_KEY env var."""
     from groq import Groq
-    client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+    client = Groq(api_key=os.environ.get("GROQ_API_KEY"), base_url=endpoint_identity("groq"))
     resp = client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": prompt}],
@@ -125,7 +141,7 @@ def _call_openai(model: str, prompt: str, temperature: float,
                  max_tokens: int, seed: int) -> str:
     """Call OpenAI API. Requires OPENAI_API_KEY env var."""
     from openai import OpenAI
-    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"), base_url=endpoint_identity("openai"))
     resp = client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": prompt}],
@@ -147,13 +163,15 @@ def _call_local(model: str, prompt: str, temperature: float,
 
     if not hasattr(_call_local, "_pipes"):
         _call_local._pipes = {}
-    if model not in _call_local._pipes:
+    revision = model_revision.get()
+    model_key = (model, revision)
+    if model_key not in _call_local._pipes:
         print(f"[llm] Loading local model {model} (first call only)…")
-        _call_local._pipes[model] = hf_pipeline(
+        _call_local._pipes[model_key] = hf_pipeline(
             "text-generation", model=model,
-            torch_dtype=torch.float16, device_map="auto",
+            torch_dtype=torch.float16, device_map="auto", revision=revision,
         )
-    pipe = _call_local._pipes[model]
+    pipe = _call_local._pipes[model_key]
     out = pipe(
         prompt,
         max_new_tokens=max_tokens,
@@ -190,34 +208,63 @@ def call(
     Returns:
         The model's text response as a plain string.
     """
-    key = _make_key(model, prompt, temperature, max_tokens, seed)
+    if provider not in ("groq", "openai", "local"):
+        raise ValueError(f"Unknown provider: {provider!r}")
+    if run_seed.get() is not None:
+        seed = run_seed.get() + seed - 42
+    use_cache = use_cache and not bypass_cache.get()
+    key = _make_key(model, prompt, temperature, max_tokens, seed, provider)
+
+    def record_response(response, cached):
+        if not isinstance(response, str):
+            raise ValueError("LLM returned no text response")
+        callback = recorder.get()
+        if callback:
+            callback({"provider": provider, "endpoint": endpoint_identity(provider),
+                      "model": model, "prompt": prompt, "response": response,
+                      "temperature": temperature, "max_tokens": max_tokens,
+                      "seed": seed, "cache_hit": cached,
+                      "revision": model_revision.get() if provider == "local" else None})
+        if strict.get() and not response.strip():
+            raise ValueError("Empty LLM response")
+        return response
 
     if use_cache:
         cached = _cache_get(key)
         if cached is not None:
-            return cached
+            return record_response(cached, True)
 
-    if provider == "groq":
-        response = _call_groq(model, prompt, temperature, max_tokens, seed)
-    elif provider == "openai":
-        response = _call_openai(model, prompt, temperature, max_tokens, seed)
-    elif provider == "local":
-        response = _call_local(model, prompt, temperature, max_tokens)
-    else:
-        raise ValueError(f"Unknown provider: {provider!r}. Use 'groq', 'openai', or 'local'.")
+    try:
+        if provider == "groq":
+            response = _call_groq(model, prompt, temperature, max_tokens, seed)
+        elif provider == "openai":
+            response = _call_openai(model, prompt, temperature, max_tokens, seed)
+        elif provider == "local":
+            response = _call_local(model, prompt, temperature, max_tokens)
+        else:
+            raise ValueError(f"Unknown provider: {provider!r}. Use 'groq', 'openai', or 'local'.")
+    except Exception as exc:
+        callback = recorder.get()
+        if callback:
+            callback({"provider": provider, "endpoint": endpoint_identity(provider),
+                      "model": model, "prompt": prompt, "temperature": temperature,
+                      "max_tokens": max_tokens, "seed": seed, "cache_hit": False,
+                      "error": {"type": type(exc).__name__, "message": str(exc)}})
+        raise
 
     if use_cache:
         _cache_set(key, model, response)
 
-    return response
+    return record_response(response, False)
 
 
 def reset_connection() -> None:
     """Force re-initialise the DB connection (call after changing LLM_CACHE_PATH)."""
-    global _conn
+    global _conn, _conn_path
     if _conn is not None:
         try:
             _conn.close()
         except Exception:
             pass
     _conn = None
+    _conn_path = None

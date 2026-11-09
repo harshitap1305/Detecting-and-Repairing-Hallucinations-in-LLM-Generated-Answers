@@ -1,7 +1,8 @@
 # Reproducible evaluation protocol (version 1)
 
-Status: preparation infrastructure is implemented. Human gold, system execution,
-independent assessment, and final report generation are subsequent milestones.
+Status: preparation and [system execution](benchmark_runner.md) are implemented.
+Human gold, independent assessment, corrected scoring, and final report generation
+are subsequent milestones.
 The current numerical reports remain unverified.
 
 ## Configuration and sampling
@@ -56,6 +57,8 @@ rather than claims of faithful reproduction of published systems.
 
 `SYSTEMS` in `src/experiments/protocol.py` is the machine-readable registry.
 Configuration validation does not execute adapters or certify a completed run.
+Use `scripts/run_benchmark.py` to execute adapters as described in
+[the runner guide](benchmark_runner.md).
 
 Run answer detection separately: derive gold answer hallucination as any
 check-worthy Contradicted or Unverifiable claim. B1 is applicable here; do not
@@ -122,10 +125,9 @@ Sentence spans use the declared spaCy model and exact model package version.
 refuses missing sentence components or missing packages; it never downloads a
 model or falls back. Preparation does not need sentence segmentation because
 claims are blank. Inventory editing and future benchmark adapters must call
-this check and record the spaCy runtime version. The current legacy pipeline
-and gold-validator CLI are not yet wired to this configuration: curators must
-use the same installed model for validation. Integration and automatic version
-recording are part of the runner increment.
+this check and record the spaCy runtime version. The benchmark runner pins this segmenter and records runtime versions. The
+standalone legacy pipeline and gold-validator CLI still use their existing
+setup: curators must use the same installed model for gold validation.
 
 ## Metrics, independent review, and test discipline
 

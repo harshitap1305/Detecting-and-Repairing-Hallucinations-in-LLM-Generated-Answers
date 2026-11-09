@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from src.schema import AnswerRecord, Claim, EvidencePassage
+from src.experiments.runtime import strict
 
 
 # ─── Module-Level Stores ──────────────────────────────────────────────────────
@@ -301,6 +302,8 @@ def rerank_cross_encoder(
             from sentence_transformers import CrossEncoder
             _cross_encoder = CrossEncoder(model_name)
         except Exception:
+            if strict.get():
+                raise
             _cross_encoder = None
 
     if _cross_encoder is None:

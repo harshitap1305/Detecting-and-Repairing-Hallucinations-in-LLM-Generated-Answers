@@ -294,3 +294,8 @@ This exports deterministic blank annotation packets, prediction-safe inputs,
 split candidates, and a provenance manifest. Source dev/test assignments are
 preserved. It requires human annotation before any gold benchmark exists;
 experiment execution and final evaluation are later implementation increments.
+
+The [benchmark runner](docs/benchmark_runner.md) executes the configured systems
+with isolated inputs, native output envelopes, request traces, immutable attempts,
+and identity-checked resume. Its `execution_complete` status is separate from
+independent evaluation and final benchmark completion.
