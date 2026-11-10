@@ -1,0 +1,18 @@
+{
+  "provider": "groq",
+  "model": "openai/gpt-oss-120b",
+  "repair_guard": "grounded_v1",
+  "repair_policy": "rewrite-only",
+  "reasoning_effort": "low",
+  "gptoss_min_completion_tokens": 4096,
+  "query_strategy": "contextual_v1",
+  "retrieval_max_queries": 3,
+  "retrieval_max_passages": 20,
+  "tracking_max_claims": 64,
+  "max_repair_iterations": 2,
+  "extraction_check": "semantic_v1",
+  "extraction_max_attempts": 2,
+  "extraction_max_checks": 2,
+  "extraction_max_claims": 64,
+  "entity_planner_version": 2
+}

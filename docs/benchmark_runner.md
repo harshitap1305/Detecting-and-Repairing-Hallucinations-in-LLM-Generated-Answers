@@ -309,3 +309,22 @@ separate target-only verification success. These diagnostics cannot substitute
 for a new independent human assessment. Both historical final and v3 progress
 bundles continue to audit under their recorded semantics. Use a fresh run directory
 after the phase 5 live-pilot handoff; do not resume an old run with these changes.
+
+
+## Follow-up pilot execution and incomplete-run packaging
+
+The versioned `configs/pilot_followup_v4.options.json` freezes semantic extraction
+and repair settings and asserts `entity_planner_version: 2`. A mismatch with the
+installed planner is rejected before inference. `scripts/run_followup_pilot.py`
+executes the dev repair task and produces immutable per-manifest product revisions
+with source-bound diagnostics, coverage and an audited progress bundle. Complete
+runs additionally receive reference metrics and a fresh blinded review packet.
+Incomplete runs never receive subset reference comparisons or review packets;
+failed attempt traces and structured extraction findings are retained. The command
+returns nonzero for incomplete execution and still attempts a small backup ZIP.
+
+`<run_name>_products/latest.json` locates the newest product revision. Reprocessing
+an identical revision preserves its packet; an updated execution creates a new
+revision and retains old partial diagnostics. Source snapshots and previous run
+artifacts are preserved. See [the existing-runtime v4 instructions](colab_followup_v4.md)
+for the two Colab cells and the distinction between progress and final evaluation.

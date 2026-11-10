@@ -9,7 +9,7 @@ def export_results(root: Path, run_name: str, output: Path):
     if not run_name or Path(run_name).name != run_name or run_name in ('.', '..'):
         raise ValueError('run_name must be a single directory name')
     roots = [root / run_name] + [root / f'{run_name}_{suffix}' for suffix in
-              ('reference_metrics.json', 'retrieval_review.json', 'review', 'progress', 'diagnostics.json')]
+              ('reference_metrics.json', 'retrieval_review.json', 'review', 'progress', 'diagnostics.json', 'products')]
     if not (root / run_name / 'manifest.json').is_file():
         raise ValueError('Run manifest missing')
     with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as archive:

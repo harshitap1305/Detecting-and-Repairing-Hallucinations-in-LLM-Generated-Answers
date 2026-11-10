@@ -1,5 +1,8 @@
 # Follow-up development pilot v3
 
+Historical handoff: v3 execution is preserved. For the corrected next run in the
+existing runtime, use [the v4 handoff](colab_followup_v4.md).
+
 Software for follow-up phases 1–5 and the phase 6 run workflow is implemented.
 The new live experiment, independent assessment of its outputs and final audited
 bundle remain pending. The local workspace has no Groq credential or access to

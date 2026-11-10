@@ -32,7 +32,7 @@ DEFAULTS = {"provider": "groq", "model": "llama-3.3-70b-versatile", "model_revis
             "retrieval_max_passages": 20, "tracking_max_claims": 64, "repair_guard": "grounded_v1",
             "reasoning_effort": "low", "gptoss_min_completion_tokens": 4096,
             "extraction_check": "semantic_v1", "extraction_max_attempts": 2,
-            "extraction_max_checks": 2, "extraction_max_claims": 64}
+            "extraction_max_checks": 2, "extraction_max_claims": 64, "entity_planner_version": 2}
 
 
 def now():
@@ -105,7 +105,9 @@ def resolve_options(config_path: Path, config: dict, options: dict | None) -> di
     if (type(result["consistency_threshold"]) not in (int, float)
             or not 0 <= result["consistency_threshold"] <= 1):
         raise ValueError("consistency_threshold must be in [0,1]")
-    from src.retrieve import validate_retrieval_options
+    from src.retrieve import validate_retrieval_options, ENTITY_PLANNER_VERSION
+    if type(result["entity_planner_version"]) is not int or result["entity_planner_version"] != ENTITY_PLANNER_VERSION:
+        raise ValueError("entity_planner_version must match the installed planner version")
     validate_retrieval_options(result["query_strategy"], result["retrieval_max_queries"],
                                result["retrieval_max_passages"], result["top_k"])
     if type(result["tracking_max_claims"]) is not int or not 1 <= result["tracking_max_claims"] <= 512:

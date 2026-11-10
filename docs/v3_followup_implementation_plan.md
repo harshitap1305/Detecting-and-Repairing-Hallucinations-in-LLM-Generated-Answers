@@ -1,7 +1,8 @@
 # Implementation plan: defects exposed by the v3 pilot
 
-Status: phases 1–4 implemented with offline regression coverage. Phase 5
-validation/live execution and new human assessment remain pending. Semantic
+Status: phases 1–4 and phase 5 run preparation implemented with offline
+regression coverage. Phase 5 live execution, output inspection and new human
+assessment remain pending; follow `docs/colab_followup_v4.md`. Semantic
 checks and extraction-aware pipeline gating are model diagnostics, not independent
 factual evaluation. No new live run has been performed.
 
