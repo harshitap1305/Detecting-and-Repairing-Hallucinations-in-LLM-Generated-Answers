@@ -41,3 +41,6 @@ results/evaluation/
 
 # Private blinded ratings, adjudication, and identity mappings
 data/review_batches/
+
+# Human-reviewed gold annotations and review provenance remain private
+data/gold/

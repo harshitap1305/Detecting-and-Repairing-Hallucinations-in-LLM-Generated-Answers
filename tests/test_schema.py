@@ -46,6 +46,15 @@ def _make_record() -> AnswerRecord:
 # ── tests ─────────────────────────────────────────────────────────────────────
 
 class TestEvidencePassage(unittest.TestCase):
+    def test_inline_citation_roundtrip_and_legacy_default(self):
+        record = _make_record()
+        record.claims[0].evidence[0].url = "https://en.wikipedia.org/wiki/Albert_Einstein"
+        restored = AnswerRecord.from_jsonl_line(record.to_jsonl_line())
+        self.assertEqual(restored.claims[0].evidence[0].url,
+                         "https://en.wikipedia.org/wiki/Albert_Einstein")
+        legacy = EvidencePassage(doc_id="old", title="Old", text="Legacy passage")
+        self.assertIsNone(legacy.url)
+
     def test_default_score(self):
         ep = EvidencePassage(doc_id="x_0", title="X", text="hello")
         self.assertEqual(ep.score, 0.0)

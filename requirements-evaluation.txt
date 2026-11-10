@@ -1,0 +1,9 @@
+# Python 3.12 runtime tested for HaluEval annotation and prompted BM25 evaluation.
+# CPU PyTorch is installed separately when running the full test suite.
+-r requirements-test.txt
+numpy==1.26.4
+scipy==1.14.1
+spacy==3.7.5
+click==8.1.8
+groq==0.37.1
+https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl

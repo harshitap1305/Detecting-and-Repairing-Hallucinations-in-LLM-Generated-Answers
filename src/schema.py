@@ -26,6 +26,7 @@ class EvidencePassage:
     text: str
     score: float = 0.0   # retrieval score (higher = more relevant)
     chunk_id: int = 0
+    url: Optional[str] = None  # citation URL; optional for indexed corpus passages
 
 
 @dataclass

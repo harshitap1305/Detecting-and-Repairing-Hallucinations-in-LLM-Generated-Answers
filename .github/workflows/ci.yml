@@ -29,18 +29,20 @@ jobs:
           python -m pip install -r requirements-test.txt
       - name: Compile Python sources
         run: python -m compileall -q scripts src demo
-      - name: Validate Colab notebook
+      - name: Validate Colab notebooks
         run: |
           python - <<'PY'
           import ast
           import nbformat
           from pathlib import Path
 
-          notebook = nbformat.read(Path('notebooks/04_train_A_C_colab.ipynb'), as_version=4)
-          nbformat.validate(notebook)
-          for cell in notebook.cells:
-              if cell.cell_type == 'code':
-                  ast.parse(cell.source)
+          for path in ('notebooks/04_train_A_C_colab.ipynb',
+                       'notebooks/05_run_reviewed_pilot_colab.ipynb'):
+              notebook = nbformat.read(Path(path), as_version=4)
+              nbformat.validate(notebook)
+              for cell in notebook.cells:
+                  if cell.cell_type == 'code':
+                      ast.parse(cell.source)
           PY
       - name: Verify offline annotation-to-report lifecycle
         env:

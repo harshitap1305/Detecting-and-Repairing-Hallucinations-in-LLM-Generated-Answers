@@ -311,3 +311,13 @@ saved executions and independent assessments for offline recomputation. Use
 `scripts/audit_baseline.py --bundle ... --gold ...` to verify it. Final repair
 reports require complete adjudicated reviews; progress reports show coverage
 without final performance claims. Historical tables remain unverified.
+
+Step 5 has begun with [real HaluEval preparation and a human handoff](docs/halueval_experiment_handoff.md):
+50 development and 100 test candidates, blank annotation packets, sentence
+offsets, and a five-record B0 execution smoke test. Human gold, independent
+reviews, a full retrieval index, and a live provider credential are still needed
+for measured pipeline results. Preparation tools do not manufacture annotations.
+
+For the reviewed five-record pilot, follow [the Colab instructions](docs/colab_reviewed_pilot.md)
+and open `notebooks/05_run_reviewed_pilot_colab.ipynb`. Reviewed evidence passages
+include inline citation URLs; private gold is uploaded separately from the code.

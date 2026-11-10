@@ -1,0 +1,61 @@
+# Candidate selection only. Human gold and live evaluation remain pending.
+schema_version: 1
+seed: 42
+splits:
+  dev: 50
+  test: 100
+corpus:
+  snapshot: fever-wikipedia-2017
+  index_path: ../indexes/bm25_A.pkl
+segmentation:
+  backend: spacy
+  model: en_core_web_sm
+  version: 3.7.1
+systems:
+- id: pipeline
+  tasks:
+  - claim_verification
+  - repair
+  retrieval: bm25
+- id: b0
+  tasks:
+  - repair
+  retrieval: none
+- id: b1
+  tasks:
+  - answer_detection
+  retrieval: none
+- id: b2
+  tasks:
+  - repair
+  retrieval: none
+- id: b3
+  tasks:
+  - repair
+  retrieval: none
+- id: b4
+  tasks:
+  - repair
+  retrieval: none
+- id: b5
+  tasks:
+  - repair
+  retrieval: bm25
+- id: b6
+  tasks:
+  - repair
+  retrieval: bm25
+  detector: pipeline_detector
+- id: b7
+  tasks:
+  - claim_verification
+  - repair
+  retrieval: bm25
+sources:
+- id: halueval
+  path: ../data/processed/halueval_v1/candidates.jsonl
+  version: RUCAIBox/HaluEval@b7253db3cdaa0ab2c382f92b26b390109174f77e/data/qa_data.json;
+    halueval-prompt-mix-v1; seed=42
+  quotas:
+    dev: 50
+    test: 100

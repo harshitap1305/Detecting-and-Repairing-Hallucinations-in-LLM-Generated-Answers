@@ -9,6 +9,16 @@ execution. No measured result is claimed by the synthetic tests. See
 [offline evaluation](independent_evaluation.md), and
 [result bundles](evaluation_bundles.md).
 
+Step 5 has started: a pinned HaluEval cohort (50 dev / 100 test), blank human
+packets, sentence references, and a five-record B0 operational smoke run are
+prepared. Full pytest verification passed (219 tests plus 35 subtests). The live
+pipeline pilot and final benchmark remain pending live resources and the full
+human gold/reviews. The first five pilot records have now been finalized as
+human-reviewed AI-assisted annotations with citations (user-confirmed acceptance);
+corpus alignment, a real retrieval index, and an API credential remain outstanding. See the
+[actual experiment handoff](halueval_experiment_handoff.md).
+
+
 ## Objective and boundaries
 
 Make every reported result traceable to frozen inputs, a declared protocol,
