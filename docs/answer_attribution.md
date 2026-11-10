@@ -3,7 +3,7 @@
 This contract records a model's proposed mapping from answer content to question
 relationships. It is stored at `record.decomposition_diagnostics.attribution`;
 no new field is required on canonical claims or historical gold records.
-Decomposition diagnostics now use semantics version 4; the nested attribution
+Decomposition diagnostics now use semantics version 5; the nested attribution
 contract has its own `semantics_version: 1`.
 
 ## Question clauses and source coordinates
@@ -122,3 +122,20 @@ this diagnostic; they can still be verified/repaired for fixed-inventory tasks.
 Generated replacements are checked normally. This does not certify end-to-end
 extraction for an externally supplied original inventory. Empty answers, evidence
 gaps, no-op edits, target alignment failures and extraction failures remain distinct.
+
+
+## Exact-quote recovery and audit formatting retries
+
+`attribution_anchor_mode=unique_quote_v1` can correct a borrowed-context numeric
+span only when the unchanged quoted string occurs exactly once in its declared
+original question/answer. It does not fuzzy-match, change source text, relabel a
+relationship or choose among duplicate occurrences. Strict structural validation
+runs afterwards. Attempt diagnostics retain `span_repairs` with old/new positions;
+raw model responses remain in request traces. `strict` mode disables recovery.
+
+Audit prompt version 2 clarifies that an expressed `answer_only` fact has no
+answered-clause IDs; a question's absent answer belongs in `clause_checks` as
+unanswered, never in `missing_content` with an empty or zero-length answer span.
+One malformed-format/consistency retry can reuse the same extraction, within the
+existing logical check cap. Its prior failure is retained. Semantic rejections
+still return to generation, and contradictions cannot be automatically approved.

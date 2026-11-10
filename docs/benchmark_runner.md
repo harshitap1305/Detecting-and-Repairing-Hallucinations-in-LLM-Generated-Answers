@@ -328,3 +328,20 @@ an identical revision preserves its packet; an updated execution creates a new
 revision and retains old partial diagnostics. Source snapshots and previous run
 artifacts are preserved. See [the existing-runtime v4 instructions](colab_followup_v4.md)
 for the two Colab cells and the distinction between progress and final evaluation.
+
+
+## V4 failure recovery profile
+
+`configs/pilot_followup_v4b.options.json` selects exact-quote anchoring and bounded
+Groq rate-limit recovery. Runtime identity now includes `attribution_anchor_mode`
+(`strict` or `unique_quote_v1`), `rate_limit_retries` (0–5, default 3), and
+`rate_limit_wait_budget` (0–60 seconds, default 30). Retries honor provider timing
+and never exceed the total sleep budget. `rate_limit_retry` trace events record
+delays and their source. SDK retries are disabled for this Groq client to avoid
+multiplying hidden retries; non-429 errors continue to surface normally. These
+transport settings do not change the model response cache key because the actual
+model request is unchanged, but are frozen in execution identity.
+
+Use a fresh v4b run after updating source; preserve the incomplete v4 artifacts.
+The same two-generation/two-semantic-check limits remain in force. See
+[colab_followup_v4b.md](colab_followup_v4b.md) for existing-runtime instructions.

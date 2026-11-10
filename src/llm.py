@@ -24,6 +24,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
+import re
+import time
+from email.utils import parsedate_to_datetime
 import os
 import sqlite3
 from datetime import datetime, timezone
@@ -147,20 +151,63 @@ def cache_stats() -> dict:
 
 # ─── LLM Backends ─────────────────────────────────────────────────────────────
 
+def _rate_limit_delay(exc, attempt):
+    headers = getattr(getattr(exc, "response", None), "headers", {})
+    for name, scale in (("retry-after-ms", .001), ("retry-after", 1.)):
+        value = headers.get(name)
+        if value is None:
+            continue
+        try:
+            delay = float(value) * scale
+        except (ValueError, TypeError):
+            try:
+                date = parsedate_to_datetime(value)
+                if date.tzinfo is None:
+                    date = date.replace(tzinfo=timezone.utc)
+                delay = (date - datetime.now(timezone.utc)).total_seconds()
+            except (ValueError, TypeError, OverflowError):
+                continue
+        if math.isfinite(delay):
+            return max(0., delay) + .05, name
+    match = re.search(r"try again in\s+([0-9]+(?:\.[0-9]+)?)\s*(ms|s|m|h)\b", str(exc), re.I)
+    if match:
+        return float(match[1]) * {"ms":.001,"s":1.,"m":60.,"h":3600.}[match[2].lower()] + .05, "provider_message"
+    return min(2. ** attempt, 8.), "bounded_backoff"
+
+
 def _call_groq(model: str, prompt: str, temperature: float,
                max_tokens: int, seed: int) -> str:
     """Call Groq API. Requires GROQ_API_KEY env var."""
-    from groq import Groq
-    client = Groq(api_key=os.environ.get("GROQ_API_KEY"), base_url=endpoint_identity("groq"))
+    from groq import Groq, RateLimitError
+    # One observable retry layer, rather than SDK retries multiplied by ours.
+    client = Groq(api_key=os.environ.get("GROQ_API_KEY"), base_url=endpoint_identity("groq"), max_retries=0)
     reasoning_options = backend_parameters(model, "groq")
-    resp = client.chat.completions.create(
-        model=model,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=temperature,
-        max_tokens=max_tokens,
-        seed=seed,
-        **reasoning_options,
-    )
+    settings = request_settings.get() or {}
+    retries = settings.get("rate_limit_retries", 3)
+    wait_budget = settings.get("rate_limit_wait_budget", 30.)
+    if type(retries) is not int or not 0 <= retries <= 5:
+        raise ValueError("rate_limit_retries must be between 0 and 5")
+    if type(wait_budget) not in (int, float) or not math.isfinite(wait_budget) or not 0 <= wait_budget <= 60:
+        raise ValueError("rate_limit_wait_budget must be between 0 and 60 seconds")
+    waited = 0.
+    for attempt in range(retries + 1):
+        try:
+            resp = client.chat.completions.create(
+                model=model, messages=[{"role": "user", "content": prompt}],
+                temperature=temperature, max_tokens=max_tokens, seed=seed, **reasoning_options,
+            )
+            break
+        except RateLimitError as exc:
+            delay, source = _rate_limit_delay(exc, attempt)
+            if attempt >= retries or delay > wait_budget - waited:
+                raise  # Never retry earlier than a provider's requested wait.
+            callback = recorder.get()
+            if callback:
+                callback({"event":"rate_limit_retry", "provider":"groq", "model":model,
+                          "retry":attempt + 1, "delay_seconds":delay, "source":source,
+                          "waited_seconds":waited, "wait_budget_seconds":wait_budget})
+            time.sleep(delay)
+            waited += delay
     if not resp.choices:
         raise ValueError("Groq returned no completion choices")
     _completion_metadata(resp, "groq", model)

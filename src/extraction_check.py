@@ -19,10 +19,10 @@ def extraction_identity(question, answer, claims, attribution):
 
 
 def check_extraction(*, question, answer, items, attribution, record_id, model, provider,
-                     max_claims=64, use_cache=True):
+                     max_claims=64, use_cache=True, retry_feedback=None):
     if type(max_claims) is not int or not 1 <= max_claims <= 128:
         raise ValueError('max_claims must be between 1 and 128')
-    base = {'semantics_version': 1, 'kind': 'model_semantic_extraction_check',
+    base = {'semantics_version': 2, 'kind': 'model_semantic_extraction_check',
             'status': 'unresolved', 'model_calls': 0}
     if attribution.get('status') != 'proposed':
         return {**base, 'reason': 'missing_or_partial_attribution'}
@@ -52,11 +52,24 @@ def check_extraction(*, question, answer, items, attribution, record_id, model, 
         '"claim_ids":["id"],"rationale":"explanation"}],'
         '"missing_content":[{"answer_span":[0,5],"clause_ids":["q1"],"rationale":"missing relationship/fact"}]}. '
         'Use empty missing_content only after checking every factual answer assertion. '
-        'Represented clauses require expressed claim IDs. Unanswered clauses have no claim IDs.\n'
+        'Represented clauses require expressed claim IDs. Unanswered clauses have no claim IDs. '
+        'IMPORTANT: claim_checks.clause_ids names clauses actually ANSWERED by that claim, not clauses '
+        'with a shared topic or referent. An expressed answer_only fact has clause_ids=[], even if it '
+        'mentions the entity in q1. Nonresponsive factual text is still factual, not nonfactual. '
+        'missing_content means PRESENT answer content omitted from extraction, NEVER an unanswered '
+        'question or missing information the answer never supplied. Never use [] or [0,0] as an answer_span. '
+        'Example: question="When was Cedar County created?", answer="Cedar County has many languages.", '
+        'claim="Cedar County has many languages.". Correct claim check: expressed, clause_ids=[]. '
+        'Correct clause check: q1 unanswered, claim_ids=[]. Correct missing_content=[]. This checks '
+        'faithful extraction only, not whether the question was usefully answered.\n'
         + json.dumps({'question': question, 'answer': answer,
             'claims': audit_claims,
             'proposed_attribution': attribution}, ensure_ascii=False)
     )
+    if retry_feedback:
+        prompt += ("\nPrevious audit was invalid: " + str(retry_feedback.get('detail')) +
+                   ". Recheck the raw inputs and return a consistent schema. Do not turn a genuine "
+                   "semantic rejection into approval just to satisfy the schema.")
     response = llm.call(prompt, model=model, provider=provider, max_tokens=2048, use_cache=use_cache)
     base['model_calls'] = 1
     try:

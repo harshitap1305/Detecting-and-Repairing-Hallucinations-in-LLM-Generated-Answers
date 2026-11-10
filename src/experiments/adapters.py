@@ -26,6 +26,7 @@ def execute(system: dict, record: AnswerRecord, task: str, options: dict) -> dic
         "retrieval_max_queries": options.get("retrieval_max_queries", 3),
         "retrieval_max_passages": options.get("retrieval_max_passages", 20),
         "tracking_max_claims": options.get("tracking_max_claims", 64),
+        "attribution_anchor_mode": options.get("attribution_anchor_mode", "unique_quote_v1"),
         "extraction_check": options.get("extraction_check", "semantic_v1"),
         "extraction_max_attempts": options.get("extraction_max_attempts", 2),
         "extraction_max_checks": options.get("extraction_max_checks", 2),

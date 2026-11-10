@@ -1,5 +1,8 @@
 # Follow-up v4: run in the existing Colab session
 
+The recorded v4 attempt is incomplete. For the failure-recovery code and a fresh
+run name, follow [the v4b handoff](colab_followup_v4b.md).
+
 Status: v4 profile, code package and complete/incomplete run workflow prepared.
 Live execution, inspection of new outputs, independent human assessment and a
 final audited v4 bundle remain pending. No new performance result is claimed.

@@ -32,7 +32,8 @@ DEFAULTS = {"provider": "groq", "model": "llama-3.3-70b-versatile", "model_revis
             "retrieval_max_passages": 20, "tracking_max_claims": 64, "repair_guard": "grounded_v1",
             "reasoning_effort": "low", "gptoss_min_completion_tokens": 4096,
             "extraction_check": "semantic_v1", "extraction_max_attempts": 2,
-            "extraction_max_checks": 2, "extraction_max_claims": 64, "entity_planner_version": 2}
+            "extraction_max_checks": 2, "extraction_max_claims": 64, "entity_planner_version": 2, "attribution_anchor_mode": "unique_quote_v1",
+            "rate_limit_retries": 3, "rate_limit_wait_budget": 30.0}
 
 
 def now():
@@ -89,6 +90,14 @@ def resolve_options(config_path: Path, config: dict, options: dict | None) -> di
     for key in ("top_k", "n_samples", "max_repair_iterations"):
         if type(result[key]) is not int or result[key] < 1:
             raise ValueError(f"{key} must be a positive integer")
+    if result["attribution_anchor_mode"] not in ("strict", "unique_quote_v1"):
+        raise ValueError("attribution_anchor_mode must be strict or unique_quote_v1")
+    if type(result["rate_limit_retries"]) is not int or not 0 <= result["rate_limit_retries"] <= 5:
+        raise ValueError("rate_limit_retries must be between 0 and 5")
+    import math
+    if (type(result["rate_limit_wait_budget"]) not in (int, float)
+            or not math.isfinite(result["rate_limit_wait_budget"]) or not 0 <= result["rate_limit_wait_budget"] <= 60):
+        raise ValueError("rate_limit_wait_budget must be between 0 and 60 seconds")
     if result["extraction_check"] not in ("structural", "semantic_v1"):
         raise ValueError("extraction_check must be structural or semantic_v1")
     for key, maximum in (("extraction_max_attempts", 4), ("extraction_max_checks", 4), ("extraction_max_claims", 128)):

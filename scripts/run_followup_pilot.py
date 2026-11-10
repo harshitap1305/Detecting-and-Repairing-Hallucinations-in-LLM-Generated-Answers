@@ -1,4 +1,4 @@
-"""Run the v4 dev pilot, audit progress, and export artifacts even after failures."""
+"""Run the follow-up dev pilot, audit progress, and export artifacts even after failures."""
 from __future__ import annotations
 import argparse
 import json
@@ -13,9 +13,9 @@ from scripts.export_pilot_results import export_results
 def main(argv=None):
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--results-root',type=Path,required=True)
-    p.add_argument('--run-name',default='pilot_followup_v4')
+    p.add_argument('--run-name',default='pilot_followup_v4b')
     p.add_argument('--config',type=Path,default=ROOT/'configs/evaluation_halueval_colab.yaml')
-    p.add_argument('--options-file',type=Path,default=ROOT/'configs/pilot_followup_v4.options.json')
+    p.add_argument('--options-file',type=Path,default=ROOT/'configs/pilot_followup_v4b.options.json')
     p.add_argument('--gold',type=Path,default=ROOT/'data/gold/pilot_dev.jsonl')
     p.add_argument('--splits',type=Path,default=ROOT/'data/gold/pilot_splits.json')
     p.add_argument('--previous-run',type=Path)

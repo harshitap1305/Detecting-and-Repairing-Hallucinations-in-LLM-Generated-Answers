@@ -48,6 +48,7 @@ def run_pipeline(
     extraction_max_attempts: int = 2,
     extraction_max_checks: int = 2,
     extraction_max_claims: int = 64,
+    attribution_anchor_mode: str = "unique_quote_v1",
     # ── LLM & Verifier ──
     llm_model: str = "llama-3.3-70b-versatile",
     provider: str = "groq",
@@ -78,6 +79,8 @@ def run_pipeline(
     if type(tracking_max_claims) is not int or not 1 <= tracking_max_claims <= 512:
         raise ValueError("tracking_max_claims must be between 1 and 512")
     validate_retrieval_options(query_strategy, retrieval_max_queries, retrieval_max_passages, top_k)
+    if attribution_anchor_mode not in ("strict", "unique_quote_v1"):
+        raise ValueError("attribution_anchor_mode must be strict or unique_quote_v1")
     if extraction_check not in ("structural", "semantic_v1"):
         raise ValueError("extraction_check must be structural or semantic_v1")
     for name, value, maximum in (("extraction_max_attempts", extraction_max_attempts, 4),
@@ -86,7 +89,8 @@ def run_pipeline(
         if type(value) is not int or not 1 <= value <= maximum:
             raise ValueError(f"{name} must be between 1 and {maximum}")
     extraction_options = dict(extraction_check=extraction_check, max_retries=extraction_max_attempts,
-                              max_checks=extraction_max_checks, max_check_claims=extraction_max_claims)
+                              max_checks=extraction_max_checks, max_check_claims=extraction_max_claims,
+                              attribution_anchor_mode=attribution_anchor_mode)
     retrieval_options = dict(
         index_path=index_path, method=retriever_method, top_k=top_k,
         faiss_index_path=faiss_index_path, passages_path=passages_path,

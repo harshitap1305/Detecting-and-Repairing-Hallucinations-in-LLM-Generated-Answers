@@ -110,3 +110,40 @@ def build_attribution(items, *, question, answer, sentence_spans, record_id):
                        else 'partial' if provided < len(items) else 'proposed'),
             'clause_segmentation': 'surface_v1', 'question_clauses': clauses,
             'claims': claims, 'clause_coverage': coverage}
+
+
+def reanchor_context_quotes(items, *, question, answer):
+    """Repair numeric offsets only when the unchanged quote has one exact match.
+
+    Never fuzzy-match, normalize text, choose among duplicates, or change a
+    claim, source selector, question binding, or relation. Strict validation runs
+    afterwards; raw model responses and all applied corrections stay traceable.
+    """
+    normalized, repairs = copy.deepcopy(items), []
+    for i, item in enumerate(normalized):
+        if not isinstance(item, dict) or not isinstance(item.get('attribution'), dict):
+            continue
+        bindings = item['attribution'].get('bindings')
+        if not isinstance(bindings, list):
+            continue
+        for j, binding in enumerate(bindings):
+            if not isinstance(binding, dict) or not isinstance(binding.get('borrowed_context'), list):
+                continue
+            for k, context in enumerate(binding['borrowed_context']):
+                if (not isinstance(context, dict) or context.get('source') not in ('question', 'answer')
+                        or not isinstance(context.get('text'), str) or not context['text']):
+                    continue
+                source = question if context['source'] == 'question' else answer
+                quote, span = context['text'], context.get('span')
+                if (isinstance(span, list) and len(span) == 2 and all(type(n) is int for n in span)
+                        and 0 <= span[0] < span[1] <= len(source) and source[span[0]:span[1]] == quote):
+                    continue
+                start = source.find(quote)
+                if start >= 0 and source.find(quote, start + 1) < 0:
+                    corrected = [start, start + len(quote)]
+                    repairs.append({'field': f'claims[{i}].attribution.bindings[{j}].borrowed_context[{k}].span',
+                                    'source': context['source'], 'text': quote,
+                                    'original_span': span, 'corrected_span': corrected,
+                                    'rule': 'unique_exact_quote'})
+                    context['span'] = corrected
+    return normalized, repairs

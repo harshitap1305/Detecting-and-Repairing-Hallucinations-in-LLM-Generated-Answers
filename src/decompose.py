@@ -30,7 +30,7 @@ from typing import List, Optional, Tuple
 from src.schema import AnswerRecord, Claim
 import src.llm as llm
 from src.experiments.runtime import strict, recorder
-from src.answer_attribution import build_attribution, question_clauses
+from src.answer_attribution import build_attribution, question_clauses, reanchor_context_quotes
 from src.extraction_check import check_extraction
 
 # ─── spaCy with regex fallback ────────────────────────────────────────────────
@@ -403,6 +403,7 @@ def decompose(
     extraction_check: str = "structural",
     max_checks: int = 2,
     max_check_claims: int = 64,
+    attribution_anchor_mode: str = "unique_quote_v1",
 ) -> AnswerRecord:
     """
     Decompose record.answer into atomic, decontextualized claims with span mapping.
@@ -417,6 +418,8 @@ def decompose(
     """
     if type(max_retries) is not int or not 1 <= max_retries <= 4:
         raise ValueError("max_retries must allow 1 to 4 decomposition attempts")
+    if attribution_anchor_mode not in ("strict", "unique_quote_v1"):
+        raise ValueError("attribution_anchor_mode must be strict or unique_quote_v1")
     if extraction_check not in ("structural", "semantic_v1"):
         raise ValueError("extraction_check must be structural or semantic_v1")
     if type(max_checks) is not int or not 1 <= max_checks <= 4:
@@ -426,7 +429,7 @@ def decompose(
     sentence_spans = split_sentences_with_spans(record.answer)
     if not sentence_spans:
         record.claims = []
-        record.decomposition_diagnostics = {"semantics_version": 4, "status": "empty_answer", "attempts": 0,
+        record.decomposition_diagnostics = {"semantics_version": 5, "status": "empty_answer", "attempts": 0,
             "attribution": build_attribution([], question=record.question, answer=record.answer,
                                              sentence_spans=[], record_id=record.id)}
         return record
@@ -447,6 +450,9 @@ def decompose(
             model=model, provider=provider, temperature=temp, use_cache=(attempt == 0),
         )
         parsed = _parse_claims_json(response)
+        span_repairs = []
+        if parsed is not None and attribution_anchor_mode == "unique_quote_v1":
+            parsed, span_repairs = reanchor_context_quotes(parsed, question=record.question, answer=record.answer)
         issue = ("Malformed JSON; return a JSON array." if parsed is None else
                  _inventory_issue(parsed, record.question, record.answer, sentence_spans, min_claim_length))
         if issue is None:
@@ -465,9 +471,19 @@ def decompose(
                     items=proposal, attribution=attribution, record_id=record.id, model=model,
                     provider=provider, max_claims=max_check_claims, use_cache=(attempt == 0))
                 checks_used += semantic_check["model_calls"]
+                audit_history = [semantic_check]
+                # One format/consistency retry uses the existing check budget;
+                # rejected semantic findings instead go back to extraction.
+                if semantic_check.get("reason") == "malformed_semantic_check" and checks_used < max_checks:
+                    semantic_check = check_extraction(question=record.question, answer=record.answer,
+                        items=proposal, attribution=attribution, record_id=record.id, model=model,
+                        provider=provider, max_claims=max_check_claims, use_cache=False,
+                        retry_feedback=audit_history[0])
+                    checks_used += semantic_check["model_calls"]
+                    semantic_check["prior_format_failure"] = audit_history[0]
             if semantic_check["status"] != "passed":
                 issue = "Semantic extraction unresolved: " + json.dumps(semantic_check, ensure_ascii=False)
-        attempts.append({"attempt": attempt + 1, "issue": issue, "semantic_check": semantic_check,
+        attempts.append({"attempt": attempt + 1, "issue": issue, "semantic_check": semantic_check, "span_repairs": span_repairs,
                          "proposed_claims": [{"text": c["claim"], "sentence_id": c["sentence_id"],
                                               "check_worthy": c["check_worthy"]} for c in proposal]})
         if issue is None:
@@ -477,10 +493,10 @@ def decompose(
                                or checks_used >= max_checks):
             break
     record.decomposition_diagnostics = {
-        "semantics_version": 4, "status": "unresolved_coverage" if issue else "complete",
+        "semantics_version": 5, "status": "unresolved_coverage" if issue else "complete",
         "attempts": attempt + 1, "reason": issue,
         "attribution": attribution,
-        "check_mode": extraction_check, "semantic_check": semantic_check,
+        "check_mode": extraction_check, "attribution_anchor_mode": attribution_anchor_mode, "semantic_check": semantic_check,
         "semantic_checks_used": checks_used, "attempt_history": attempts,
         "budgets": {"attempts": max_retries, "checks": max_checks, "inventory": max_check_claims},
         "stop_reason": ("semantic_check_budget_exhausted" if issue and checks_used >= max_checks else
