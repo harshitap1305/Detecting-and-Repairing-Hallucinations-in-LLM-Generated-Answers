@@ -164,8 +164,9 @@ counts, undefined-score reasons, and an explicit `stop_reason`. No check-worthy
 claims means `null`, never perfect support. `empty_answer` distinguishes deletion
 from a nonempty candidate with `no_check_worthy_claims`. Unchanged answers and
 exhausted budgets are stop conditions, not evidence of a correction. A stop
-reason `all_current_claims_supported` describes only the current predicted
-inventory; it does not establish original-claim preservation or completeness.
+reason `all_current_claims_supported` in older runs described only the current
+predicted inventory; new runs additionally gate success on tracked target coverage.
+Neither diagnostic establishes independently reviewed factuality or completeness.
 The runner's native SCR diagnostic includes these details. UI/logging displays
 undefined values as N/A. Legacy aggregate diagnostics expose defined/paired
 coverage and do not substitute original-claim scores for undefined final scores.
@@ -186,3 +187,79 @@ their original hashes and stored numeric SCR values. Existing bundles are not
 rewritten or relabeled. New code/prompt settings require a new run directory and
 new repair assessments. Original-to-candidate semantic tracking and retrieval or
 repair-policy changes remain later phases of the follow-up plan.
+
+## Claim tracking and contextual retrieval (follow-up phases 3–4)
+
+The pipeline keeps the original predicted claims immutable during repair and
+records candidate snapshots under `record.claim_tracking`. Each stage contains
+the candidate answer/claims, decomposition and verification diagnostics, evidence
+query traces, and original-to-candidate links. These are **model diagnostics**,
+not substitutes for human outcome ratings. An unchanged answer/inventory links
+directly; changed candidates use at most one model alignment request per stage.
+The request contains question, original/candidate text and predicted claims,
+never gold reference repairs or human repair ratings. Many-to-many links and
+`retained`, `modified`, `hedged`, `removed`, `unresolved` dispositions are supported.
+Malformed/incomplete alignment or an exceeded claim budget remains unresolved.
+Empty candidates are removed targets; absent decomposition is not proof of
+removal. Candidate-only propositions retain their verification labels/evidence.
+
+`all_targets_verified` requires nonempty original and candidate factual targets,
+full grounded target coverage, preservation of originally Supported targets, and
+Supported verdicts for all candidate factual claims. A hedge, unmatched target,
+unsupported new claim or ambiguous alignment prevents that state even when the
+current-inventory SCR is 1.0. A stop with `unresolved_target_coverage` is diagnostic
+abstention, not a successful repair. Semantic alignment and verification are
+fallible, so this state still does not establish independent factual correctness
+or question completeness. No-op and empty-answer stop reasons stay explicit.
+
+Pipeline and B6 runner options now include:
+
+| CLI option | Default | Meaning |
+| --- | --- | --- |
+| `--query-strategy` | `contextual_v1` | `claim_only` or bounded contextual fallback |
+| `--retrieval-max-queries` | `3` | Logical queries per target per grounding stage, including its retry; allowed 1–8 |
+| `--retrieval-max-passages` | `20` | Total returned hits before deduplication per target/stage; between top-k and 200 |
+| `--tracking-max-claims` | `64` | Combined original/candidate check-worthy inventory cap for model alignment; allowed 1–512 |
+
+These options are validated before inference and frozen in run identity; changing
+one invalidates resume. B6 uses contextual retrieval for its detector; its deletion output has no final
+verification score or candidate tracking because it is not reverified. Its
+detector-only tracking is labeled separately. Other native baselines retain their
+own retrieval algorithms. The standalone `retrieve()` API defaults to `claim_only` for existing
+callers; the updated pipeline explicitly selects `contextual_v1`.
+
+Contextual search starts with the fixed claim. Short claims, missing surface
+terms or too few hits can trigger a question-conditioned query. Unverifiable
+verdicts can also trigger continuation with the **remaining** budget, followed
+by at most one extra verification per expanded target/stage, before editing.
+Passages are evidence candidates, not verified premises. Proper-name/wiki-link
+mentions from initial/context passages can seed bounded single-hop entity queries.
+Each lead records its source document and exact text span. No recursive crawl,
+new model-generated search facts, or live web search is used. Missing evidence
+remains Unverifiable; absence is not treated as contradiction.
+
+Returned hits are deduplicated by document/chunk and fused deterministically by
+rank, with a stable tie break; optional reranking uses the original claim target.
+Caps count logical queries and their returned hits, not internal index scans or
+the native hybrid backend's component searches. Retrieval planning makes no
+extra LLM calls. For `N` original claims and repair budget `I`, at most `I+1`
+grounding stages are needed; each stage's targets have their own explicit caps.
+Each distinct changed, verified candidate has at most one alignment call (an
+unchanged inventory or unavailable/oversized inventory needs none).
+
+Retrieval diagnostics are stored on records and emitted as `event: retrieval`
+entries in benchmark traces. Cache keys include query text, question, strategy,
+caps, method, asset versions and encoder/reranker identities. In-memory lexical
+and dense index stores also use file identities. Query logs retain both fresh
+and cached hits. These surface/query heuristics are not evidence-recall or
+factuality metrics. Original gold-query retrieval inspection remains a separate
+diagnostic and never enters inference.
+
+New runs need fresh output directories and new human assessments; existing pilot
+artifacts and audit semantics are preserved. The unchanged FEVER index can be
+reused. Example additional options for the next development run:
+
+```text
+--query-strategy contextual_v1 --retrieval-max-queries 3 \
+--retrieval-max-passages 20 --tracking-max-claims 64
+```

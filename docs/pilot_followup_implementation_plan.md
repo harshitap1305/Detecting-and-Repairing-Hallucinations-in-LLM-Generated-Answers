@@ -1,6 +1,6 @@
 # Implementation plan: fixes identified by the reviewed development pilot
 
-Status: phases 1–2 implemented with offline regression coverage; phases 3–6
+Status: phases 1–4 implemented with offline regression coverage; phases 5–6
 remain planned. A new live development run has not yet been performed.
 
 ## Evidence and scope

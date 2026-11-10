@@ -27,7 +27,9 @@ ROOT = Path(__file__).resolve().parents[2]
 DEFAULTS = {"provider": "groq", "model": "llama-3.3-70b-versatile", "model_revision": "hosted-unpinned",
             "verifier": "llm", "top_k": 5, "max_repair_iterations": 2,
             "repair_policy": "rewrite+hedge", "n_samples": 5, "consistency_threshold": 0.5,
-            "faiss_index_path": None, "passages_path": None}
+            "faiss_index_path": None, "passages_path": None,
+            "query_strategy": "contextual_v1", "retrieval_max_queries": 3,
+            "retrieval_max_passages": 20, "tracking_max_claims": 64}
 
 
 def now():
@@ -92,6 +94,11 @@ def resolve_options(config_path: Path, config: dict, options: dict | None) -> di
     if (type(result["consistency_threshold"]) not in (int, float)
             or not 0 <= result["consistency_threshold"] <= 1):
         raise ValueError("consistency_threshold must be in [0,1]")
+    from src.retrieve import validate_retrieval_options
+    validate_retrieval_options(result["query_strategy"], result["retrieval_max_queries"],
+                               result["retrieval_max_passages"], result["top_k"])
+    if type(result["tracking_max_claims"]) is not int or not 1 <= result["tracking_max_claims"] <= 512:
+        raise ValueError("tracking_max_claims must be between 1 and 512")
     result["index_path"] = str((config_path.parent / config["corpus"]["index_path"]).resolve())
     for key in ("faiss_index_path", "passages_path"):
         if result[key] is not None:

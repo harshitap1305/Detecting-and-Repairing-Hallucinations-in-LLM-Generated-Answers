@@ -172,6 +172,7 @@ class TestPipeline(unittest.TestCase):
             patch("src.pipeline.retrieve", side_effect=lambda candidate, **kwargs: candidate),
             patch("src.pipeline.verify", side_effect=fake_verify),
             patch("src.pipeline.repair", side_effect=fake_repair),
+            patch("src.claim_tracking.llm.call", return_value='{}'),
         ):
             result = run_pipeline(record, max_repair_iterations=2)
 

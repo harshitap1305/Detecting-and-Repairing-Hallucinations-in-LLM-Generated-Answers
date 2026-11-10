@@ -21,6 +21,10 @@ def execute(system: dict, record: AnswerRecord, task: str, options: dict) -> dic
         "faiss_index_path": options.get("faiss_index_path"),
         "passages_path": options.get("passages_path"),
         "repair_policy": options["repair_policy"],
+        "query_strategy": options.get("query_strategy", "contextual_v1"),
+        "retrieval_max_queries": options.get("retrieval_max_queries", 3),
+        "retrieval_max_passages": options.get("retrieval_max_passages", 20),
+        "tracking_max_claims": options.get("tracking_max_claims", 64),
         "use_existing_claims": task == "claim_verification",
         "max_repair_iterations": options["max_repair_iterations"] if task == "repair" else 0,
     }
@@ -32,10 +36,24 @@ def execute(system: dict, record: AnswerRecord, task: str, options: dict) -> dic
             "before": record.reliability_score_before, "after": record.reliability_score_after}
         if record.verification_diagnostics is not None:
             native["self_verification_scr"]["details"] = record.verification_diagnostics
+        if record.claim_tracking is not None:
+            native["claim_tracking"] = record.claim_tracking["final"]
         if name == "b6":
+            detector_tracking = record.claim_tracking
             record = run_b6(record)
+            # These diagnostics describe the detector input, not B6's deleted
+            # candidate, which has not been decomposed or reverified.
+            record.claim_tracking = None
+            record.reliability_score_after = None
+            if record.verification_diagnostics:
+                record.verification_diagnostics = {
+                    "semantics_version": 2,
+                    "before": record.verification_diagnostics["before"],
+                    "stop_reason": "delete_only_not_reverified",
+                }
             native = {"detector_self_verification_scr": record.reliability_score_before,
-                      "verification_details": record.verification_diagnostics}
+                      "verification_details": record.verification_diagnostics,
+                      "detector_claim_tracking": detector_tracking["final"] if detector_tracking else None}
     elif name == "b0":
         record = run_b0(record)
     elif name == "b1":

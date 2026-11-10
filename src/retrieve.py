@@ -19,6 +19,7 @@ Public API:
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -29,22 +30,24 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from src.schema import AnswerRecord, Claim, EvidencePassage
-from src.experiments.runtime import strict
+from src.experiments.runtime import strict, recorder
 
 
 # ─── Module-Level Stores ──────────────────────────────────────────────────────
 
-_bm25_store: Dict[str, Tuple] = {}     # {path: (bm25_obj, passages)}
-_dense_store: Dict[str, Tuple] = {}    # {path: (encoder, faiss_index, passages)}
+_bm25_store: Dict[tuple, Tuple] = {}     # {file identity: (bm25_obj, passages)}
+_dense_store: Dict[tuple, Tuple] = {}    # {index/passages/encoder identity: loaded artifacts}
 _cross_encoder = None                  # Lazy loaded CrossEncoder
+_cross_encoder_name = None
 
 
 def _load_bm25(index_path: str) -> Tuple:
-    if index_path not in _bm25_store:
+    identity = _index_identity(index_path)
+    if identity not in _bm25_store:
         with open(index_path, "rb") as f:
             data = pickle.load(f)
-        _bm25_store[index_path] = (data["bm25"], data["passages"])
-    return _bm25_store[index_path]
+        _bm25_store[identity] = (data["bm25"], data["passages"])
+    return _bm25_store[identity]
 
 
 # ─── Retrieval Cache ──────────────────────────────────────────────────────────
@@ -90,9 +93,10 @@ def _index_identity(path: Optional[str]) -> tuple | None:
 def _scoped_retrieval_key(method: str, query: str, top_k: int,
                           index_path: str, faiss_index_path: Optional[str],
                           passages_path: Optional[str], encoder_name: str,
-                          cross_encoder_name: str) -> str:
+                          cross_encoder_name: str, strategy_options: Optional[dict] = None) -> str:
     payload = json.dumps({
         "method": method, "query": query.strip().casefold(), "top_k": top_k,
+        "strategy_options": strategy_options,
         "index": _index_identity(index_path),
         "faiss_index": _index_identity(faiss_index_path),
         "passages": _index_identity(passages_path),
@@ -200,7 +204,7 @@ def retrieve_dense(
     """Retrieve top-k passages using FAISS dense index with normalized embeddings."""
     import numpy as np
 
-    cache_key = faiss_index_path
+    cache_key = (_index_identity(faiss_index_path), _index_identity(passages_path), encoder_name)
     if cache_key not in _dense_store:
         import faiss
         from sentence_transformers import SentenceTransformer
@@ -296,11 +300,12 @@ def rerank_cross_encoder(
     if not candidates:
         return []
 
-    global _cross_encoder
-    if _cross_encoder is None:
+    global _cross_encoder, _cross_encoder_name
+    if _cross_encoder is None or _cross_encoder_name != model_name:
         try:
             from sentence_transformers import CrossEncoder
             _cross_encoder = CrossEncoder(model_name)
+            _cross_encoder_name = model_name
         except Exception:
             if strict.get():
                 raise
@@ -322,7 +327,85 @@ def rerank_cross_encoder(
     return scored_candidates[:top_k]
 
 
+# ─── Bounded contextual query planning ────────────────────────────────────────
+
+_QUERY_STOP = set("a an the is are was were be been of in on at to for and or by with as it its this that which what who when where how does did do has have had".split())
+
+
+def validate_retrieval_options(strategy, max_queries, max_passages, top_k):
+    if strategy not in ("claim_only", "contextual_v1"):
+        raise ValueError("query_strategy must be claim_only or contextual_v1")
+    if type(top_k) is not int or top_k < 1:
+        raise ValueError("top_k must be a positive integer")
+    if type(max_queries) is not int or not 1 <= max_queries <= 8:
+        raise ValueError("retrieval_max_queries must be between 1 and 8")
+    if type(max_passages) is not int or not top_k <= max_passages <= 200:
+        raise ValueError("retrieval_max_passages must be between top_k and 200")
+
+
+def _query_terms(text):
+    return {word for word in re.findall(r"\w+", text.casefold()) if word not in _QUERY_STOP}
+
+
+def _context_reason(claim, candidates, top_k):
+    # Surface evidence-gap signals are query planning, not factual judgments.
+    if claim.label == "Unverifiable":
+        return "previously_unverifiable"
+    if len(claim.text.split()) <= 5:
+        return "short_claim"
+    if len(candidates) < top_k:
+        return "few_initial_passages"
+    evidence_terms = _query_terms(" ".join(p.title + " " + p.text for p in candidates))
+    if _query_terms(claim.text) - evidence_terms:
+        return "uncovered_claim_terms"
+    return None
+
+
+def _linked_entities(passages, already_known, context=""):
+    """Deterministic entity hypotheses drawn only from inspected passages.
+
+    A textual mention is a retrieval lead, not proof of a relationship. Support
+    wiki-style links and proper-name phrases; keep the exact originating span.
+    """
+    seen = set()
+    for passage in passages:
+        patterns = (r"\[\[([^]\n|]+)(?:\|[^]\n]+)?\]\]",
+                    r"\b([A-Z][\w'-]+(?:[ ]+(?:[A-Z][\w'-]+|of|the|and)){0,4})")
+        matches = sorted(((priority, m) for priority, pattern in enumerate(patterns)
+                          for m in re.finditer(pattern, passage.text)),
+                         key=lambda pair: (pair[0], pair[1].start(), -len(pair[1].group(1))))
+        for _, match in matches:
+            entity = match.group(1).strip()
+            normalized = entity.casefold().replace('_', ' ')
+            if (len(entity) < 3 or normalized in seen or normalized in already_known
+                    or normalized in _QUERY_STOP
+                    or re.search(r"\b" + re.escape(normalized) + r"\b", context.casefold())):
+                continue
+            seen.add(normalized)
+            yield {"entity": entity, "source_doc_id": passage.doc_id,
+                   "source_span": [match.start(1), match.end(1)]}
+
+
+def _fetch_query(query, index_path, method, fetch_k, faiss_index_path, passages_path, encoder_name):
+    if method == "bm25":
+        return retrieve_bm25(query, index_path, top_k=fetch_k)
+    if method == "fts5":
+        return retrieve_fts5(query, index_path, top_k=fetch_k)
+    if method == "dense":
+        if not faiss_index_path or not passages_path:
+            raise ValueError("dense retrieval requires faiss_index_path and passages_path")
+        return retrieve_dense(query, faiss_index_path, passages_path, top_k=fetch_k,
+                              encoder_name=encoder_name)
+    if method == "hybrid":
+        if not faiss_index_path or not passages_path:
+            raise ValueError("hybrid retrieval requires faiss_index_path and passages_path")
+        return retrieve_hybrid(query, index_path, faiss_index_path, passages_path,
+                               top_k=fetch_k, encoder_name=encoder_name)
+    raise ValueError(f"Unknown retrieval method: {method!r}")
+
+
 # ─── Public API ───────────────────────────────────────────────────────────────
+
 
 def retrieve(
     record: AnswerRecord,
@@ -334,67 +417,116 @@ def retrieve(
     encoder_name: str = "BAAI/bge-small-en-v1.5",
     cross_encoder_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2",
     use_cache: bool = True,
+    query_strategy: str = "claim_only",
+    max_queries: int = 3,
+    max_passages: int = 20,
+    continue_unverifiable: bool = False,
 ) -> AnswerRecord:
-    """
-    Retrieve top-k evidence passages for each check-worthy claim in an AnswerRecord.
+    """Retrieve fixed claim targets with bounded, traced context/link fallbacks.
 
-    Supported methods:
-      - "bm25"
-      - "fts5"
-      - "dense"
-      - "hybrid"
-      - "bm25+rerank"
-      - "hybrid+rerank"
+    Caps apply per claim per call, counting returned passages before deduplication.
+    Linked queries have one hop from initial/context passages; no recursive crawl.
+    Scores across queries are fused by rank, never by incomparable raw scores.
     """
-    rerank = "rerank" in method
+    validate_retrieval_options(query_strategy, max_queries, max_passages, top_k)
+    rerank = "+rerank" in method
     base_method = method.replace("+rerank", "")
-
-    for claim in record.claims:
-        if not claim.check_worthy:
+    if base_method not in ("bm25", "fts5", "dense", "hybrid"):
+        raise ValueError(f"Unknown retrieval method: {method!r}")
+    settings = {"version": 1, "strategy": query_strategy, "max_queries": max_queries,
+                "max_passages": max_passages, "top_k": top_k}
+    scope = json.dumps({"method": method, "index": _index_identity(index_path),
+                        "faiss": _index_identity(faiss_index_path),
+                        "passages": _index_identity(passages_path), "question": record.question,
+                        "encoder": encoder_name, "reranker": cross_encoder_name}, sort_keys=True) if record.check_worthy_claims else "no_targets"
+    settings["scope_sha256"] = hashlib.sha256(scope.encode()).hexdigest()
+    previous = record.retrieval_diagnostics if continue_unverifiable else None
+    if continue_unverifiable and (not previous or any(previous.get(k) != v for k, v in settings.items())):
+        raise ValueError("Cannot continue retrieval with a changed strategy, budget, question or index")
+    previous_claims = {d["claim_id"]: d for d in previous["claims"]} if previous else {}
+    diagnostics = {**settings, "claims": []}
+    for claim in record.check_worthy_claims:
+        old = previous_claims.get(claim.id)
+        if old and old["target"] != claim.text:
+            raise ValueError("Cannot continue retrieval for a changed claim target")
+        if old and claim.label != "Unverifiable":
+            diagnostics["claims"].append(copy.deepcopy(old))
             continue
+        query_log = copy.deepcopy(old["queries"]) if old else []
+        rankings = [[EvidencePassage(**p) for p in q["passages"]] for q in query_log]
+        seen_queries = {q["query"].casefold() for q in query_log}
+        fetched = sum(len(rows) for rows in rankings)
+        fetch_k = min(top_k * 4 if rerank else top_k, max_passages)
 
-        cache_key = _scoped_retrieval_key(
-            method, claim.text, top_k, index_path, faiss_index_path,
-            passages_path, encoder_name, cross_encoder_name,
-        )
-        if use_cache:
-            cached = _cache_get_passages(cache_key)
-            if cached is not None:
-                claim.evidence = cached
-                continue
-
-        # Candidate retrieval
-        fetch_k = top_k * 4 if rerank else top_k
-
-        if base_method == "bm25":
-            candidates = retrieve_bm25(claim.text, index_path, top_k=fetch_k)
-        elif base_method == "fts5":
-            candidates = retrieve_fts5(claim.text, index_path, top_k=fetch_k)
-        elif base_method == "dense":
-            assert faiss_index_path and passages_path, "dense retrieval requires faiss_index_path and passages_path"
-            candidates = retrieve_dense(
-                claim.text, faiss_index_path, passages_path,
-                top_k=fetch_k, encoder_name=encoder_name
+        def run_query(query, kind, link=None):
+            nonlocal fetched
+            query = " ".join(query.split())
+            if (not query or query.casefold() in seen_queries or len(query_log) >= max_queries
+                    or fetched >= max_passages):
+                return
+            seen_queries.add(query.casefold())
+            remaining = max_passages - fetched
+            if query_strategy == "contextual_v1":
+                # Reserve a share for each remaining query, redistributing any
+                # unused returned-hit allowance without losing integer remainder.
+                slots = max_queries - len(query_log)
+                remaining = (remaining + slots - 1) // slots
+            limit = min(fetch_k, remaining)
+            key = _scoped_retrieval_key(
+                method, query, limit, index_path, faiss_index_path, passages_path,
+                encoder_name, cross_encoder_name, {**settings, "question": record.question},
             )
-        elif base_method == "hybrid":
-            assert faiss_index_path and passages_path, "hybrid retrieval requires faiss_index_path and passages_path"
-            candidates = retrieve_hybrid(
-                claim.text, index_path, faiss_index_path, passages_path,
-                top_k=fetch_k, encoder_name=encoder_name
-            )
-        else:
-            raise ValueError(f"Unknown retrieval method: {method!r}")
+            rows = _cache_get_passages(key) if use_cache else None
+            cache_hit = rows is not None
+            if rows is None:
+                rows = _fetch_query(query, index_path, base_method, limit,
+                                    faiss_index_path, passages_path, encoder_name)[:limit]
+                if use_cache:
+                    _cache_set_passages(key, rows)
+            rows = copy.deepcopy(rows[:limit])
+            fetched += len(rows)
+            rankings.append(rows)
+            query_log.append({"query": query, "kind": kind, "link": link,
+                              "cache_hit": cache_hit, "limit": limit,
+                              "passages": [p.__dict__.copy() for p in rows]})
 
-        # Optional Reranking
-        if rerank:
-            passages = rerank_cross_encoder(
-                claim.text, candidates, top_k=top_k, model_name=cross_encoder_name
-            )
-        else:
-            passages = candidates[:top_k]
-
-        claim.evidence = passages
-        if use_cache:
-            _cache_set_passages(cache_key, passages)
-
+        if not query_log:
+            run_query(claim.text, "claim")
+        trigger = _context_reason(claim, rankings[0] if rankings else [], top_k)
+        if query_strategy == "contextual_v1" and trigger:
+            run_query(f"{record.question} {claim.text}", "question_context")
+            seeds = [p for q, rows in zip(query_log, rankings)
+                     if q["kind"] != "linked_entity" for p in rows]
+            known = {p.title.casefold().replace('_', ' ') for p in seeds}
+            for lead in _linked_entities(seeds, known, record.question + " " + claim.text):
+                # Attribute terms remain from the fixed target/question. An
+                # entity mention is not asserted as a verified bridge fact.
+                run_query(f"{lead['entity']} {claim.text} {record.question}", "linked_entity", lead)
+                if len(query_log) >= max_queries or fetched >= max_passages:
+                    break
+        scores, passages = {}, {}
+        for rows in rankings:
+            local_seen = set()
+            for rank, passage in enumerate(rows, 1):
+                key = (passage.doc_id, passage.chunk_id)
+                if key in local_seen:
+                    continue
+                local_seen.add(key)
+                scores[key] = scores.get(key, 0.) + 1. / (60 + rank)
+                passages.setdefault(key, passage)
+        ordered = sorted(passages, key=lambda key: (-scores[key], key))
+        candidates = [passages[key] for key in ordered]
+        if len(rankings) > 1:
+            for key in ordered:
+                passages[key].score = scores[key]
+        claim.evidence = (rerank_cross_encoder(claim.text, candidates, top_k, cross_encoder_name)
+                          if rerank else candidates[:top_k])
+        diagnostics['claims'].append({"claim_id": claim.id, "target": claim.text,
+            "trigger": trigger if query_strategy == "contextual_v1" else None,
+            "queries": query_log, "fetched_passages": fetched, "unique_candidates": len(candidates),
+            "selected": [{"doc_id": p.doc_id, "chunk_id": p.chunk_id} for p in claim.evidence]})
+    record.retrieval_diagnostics = diagnostics
+    callback = recorder.get()
+    if callback:
+        callback({"event": "retrieval", "record_id": record.id, "diagnostics": diagnostics})
     return record

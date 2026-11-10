@@ -65,6 +65,16 @@ class TestBenchmarkRunner(unittest.TestCase):
         with self.assertRaises(FileExistsError):
             run_benchmark(**self.kwargs)
 
+    def test_retrieval_limits_are_frozen_in_identity_and_reject_changed_resume(self):
+        manifest = run_benchmark(**self.kwargs)
+        options = manifest["identity"]["options"]
+        self.assertEqual(options["query_strategy"], "contextual_v1")
+        self.assertEqual(options["retrieval_max_queries"], 3)
+        self.assertEqual(options["retrieval_max_passages"], 20)
+        self.assertEqual(options["tracking_max_claims"], 64)
+        with self.assertRaisesRegex(ValueError, "Resume identity changed"):
+            run_benchmark(**self.kwargs, resume=True, options={"retrieval_max_queries": 4})
+
     def test_failure_remains_visible_and_retry_does_not_repeat_success(self):
         from src.experiments.adapters import execute
         calls = []
