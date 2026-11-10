@@ -1,11 +1,12 @@
 # Step 5: real-data preparation and human handoff
 
-Status: **started, not complete**. The first five development records now have
-finalized human-reviewed annotations and citations, accepted by the
-project user on behalf of human reviewers. The full 50/100 human gold, real
-evidence index, API credential, live pilot, independent repair assessment, and
-final benchmark execution remain pending.
-No final factuality scores have been produced.
+Status (11 November 2026): the full benchmark remains incomplete. The first
+five development records have reviewed gold/citations; a real FEVER index and API
+access were used in Colab. Live v4b execution, human repair assessment,
+adjudication and final-bundle auditing are complete for those five records.
+The remaining 50/100 cohort annotations and full benchmark are pending.
+See the [current handoff](project_handoff.md). The preparation history and original
+operational instructions below are retained for reference.
 
 ## Work completed in this checkout
 

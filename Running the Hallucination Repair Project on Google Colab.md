@@ -1,5 +1,7 @@
 # Running the Hallucination Repair Project on Google Colab
 
+> Historical sizing advice. Corpus-selection suggestions and resource estimates below are not the frozen evaluation protocol. Use [the evaluation protocol](docs/evaluation_protocol.md), [current handoff](docs/project_handoff.md), and [pilot workflow](docs/colab_followup_v4b.md). The measured pilot used the full FEVER SQLite FTS5 index.
+
 Practical sizing and workflow advice for the NLP course project (claim-level hallucination detection and repair).
 
 The numbers below are approximate, and the free Colab tier changes over time. Check what runtime you actually get: Runtime → Change runtime type, then run `!nvidia-smi`, `!free -h` and `!df -h`.

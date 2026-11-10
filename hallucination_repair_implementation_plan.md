@@ -1,5 +1,7 @@
 # Detecting and Repairing Hallucinations in LLM Answers — Detailed Implementation Plan
 
+> Historical design proposal. Preserve this document as background; its targets and sketches are not completion evidence. See [the current handoff](docs/project_handoff.md) for implemented features, measured results and open work.
+
 **Pipeline:** question + answer → claim decomposition → evidence retrieval → claim verification → localized repair → re-verification → repaired answer + report.
 
 Conventions in this document:

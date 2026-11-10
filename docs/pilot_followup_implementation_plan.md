@@ -1,8 +1,13 @@
 # Implementation plan: fixes identified by the reviewed development pilot
 
-Status: phases 1–5 and phase 6 software/workflow implemented with offline
-regression coverage. Phase 6 live execution, new human assessments and the new
-final bundle remain pending in Colab; no new model performance is claimed.
+Status (11 November 2026): phases 1–5 and phase 6 software/workflow were
+implemented. Subsequent v3/v4/v4b executions were inspected; v4b has fresh human
+reviews, adjudication and an audited final bundle. It preserves the original
+answers and demonstrates no correction improvement. Extraction and retrieval
+weaknesses remain open. See the [current handoff](project_handoff.md).
+
+This plan's evidence section describes the earlier reviewed pilot; its results
+must not be confused with v4b.
 
 ## Evidence and scope
 

@@ -1,11 +1,10 @@
 # Follow-up v4: run in the existing Colab session
 
-The recorded v4 attempt is incomplete. For the failure-recovery code and a fresh
-run name, follow [the v4b handoff](colab_followup_v4b.md).
-
-Status: v4 profile, code package and complete/incomplete run workflow prepared.
-Live execution, inspection of new outputs, independent human assessment and a
-final audited v4 bundle remain pending. No new performance result is claimed.
+Historical workflow: v4 remains incomplete (7/10). Its failures and outputs
+are preserved. The subsequent [v4b recovery run](colab_followup_v4b.md) completed
+10/10 and has an audited human-reviewed final bundle. See the
+[current handoff](project_handoff.md). The cells below describe the original v4
+workflow; use a fresh name for any new experiment.
 
 Keep the same running notebook, Python environment, reviewed gold and FEVER
 index. Do not upload a replacement notebook or restart the runtime. Preserve

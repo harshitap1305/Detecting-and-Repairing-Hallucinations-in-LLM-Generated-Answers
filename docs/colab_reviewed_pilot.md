@@ -1,5 +1,7 @@
 # Run the reviewed pilot in Colab
 
+> Initial setup guide. For current reviewed results and artifact transfer, start with [the project handoff](project_handoff.md). Notebook 05 now uses the v4b profile; the instructions below retain the initial pilot context.
+
 The five pilot records are finalized as **human-reviewed annotations**. Each
 `evidence` entry in `data/gold/pilot_dev.jsonl` now contains `title`, `text`,
 `doc_id`, and a directly usable `url`. Detailed sections/access metadata remain

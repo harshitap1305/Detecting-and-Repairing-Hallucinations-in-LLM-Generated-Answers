@@ -1,10 +1,13 @@
 # Follow-up v4b: run in the existing Colab session
 
-Status: the original v4 run is preserved as incomplete (7/10). This revised
-profile addresses observed rate-limit handling and model-output formatting.
-Use a NEW run name; do not resume or overwrite the original v4 directory.
-Live execution, inspection of new outputs, independent human assessment and a
-final audited v4 bundle remain pending. No new performance result is claimed.
+Status (11 November 2026): v4b completed 10/10 outputs. Fresh human submissions
+and adjudication were validated, and `colab_followup_v4b/pilot_final_v1` passed
+offline audit. All original answers were preserved, with no factual corrections.
+The original v4 remains incomplete (7/10). See the [project handoff](project_handoff.md).
+
+The cells below document the execution workflow. Do not rerun a completed directory
+or resume it after changing code/configuration; a new experiment needs a fresh
+run name and frozen inputs. No new live run is required for this handoff.
 
 Keep the same running notebook, Python environment, reviewed gold and FEVER
 index. Do not upload a replacement notebook or restart the runtime. Preserve

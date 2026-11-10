@@ -1,5 +1,7 @@
 # Suggested Next Steps: Training and Fine-Tuning Paths
 
+> Historical extension proposal. Code examples are planning sketches; use [the implemented training workflow](docs/training_workflow.md) for executable A/C commands and [the current handoff](docs/project_handoff.md) for measured status. No trained-model result is claimed.
+
 Extension plan for the NLP course project *Detecting and Repairing Hallucinations in LLM-Generated Answers*. Do this **after** the base pipeline (prompted decomposition, retrieval, verification, repair, re-verification, baselines and ablations) works end to end.
 
 Conventions:

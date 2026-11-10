@@ -4,14 +4,22 @@
 
 ## Current status
 
-The prompted pipeline and its tests are in the repository. This checkout does
-not include the human gold dev/test annotations, populated split IDs, per-record
-baseline outputs, or trained model checkpoints needed to reproduce the numbers
-in the existing reports. Those numbers are **unverified from the tracked
-artifacts**; see [the baseline audit](docs/baseline_status.md) and run
-`python scripts/audit_baseline.py` to check the available files. The A+C
-training and comparison code below is ready to run, but no trained-model score
-is claimed until data, checkpoints, and held-out outputs are supplied.
+The prompted pipeline, reproducible benchmark runner, independent-review tooling,
+and offline report auditing are implemented. **Start with the
+[project handoff](docs/project_handoff.md)** for current results, setup, private
+artifact transfer, and remaining work.
+
+The latest v4b development pilot completed 10/10 outputs across five answers and
+B0/pipeline. User-supplied human reviews and adjudication were imported, and the
+final bundle passed offline audit. Both systems preserved six supported claims,
+corrected none of the one eligible answer, and introduced no new errors. This
+small pilot demonstrates no factual repair improvement.
+
+Gold annotations, raw reviews and measured bundles are private and ignored by
+Git; cloning alone does not include them. The full 50-development/100-test
+benchmark and trained A/C evaluation remain unfinished. Historical tables in
+older reports are still **unverified from tracked artifacts**; see
+[the historical baseline audit](docs/baseline_status.md).
 
 ## Pipeline
 
@@ -292,8 +300,8 @@ python3 scripts/prepare_annotation_batch.py \
 
 This exports deterministic blank annotation packets, prediction-safe inputs,
 split candidates, and a provenance manifest. Source dev/test assignments are
-preserved. It requires human annotation before any gold benchmark exists;
-experiment execution and final evaluation are later implementation increments.
+preserved. New batches require human annotation before becoming benchmark gold. Execution,
+independent scoring and report generation are implemented.
 
 The [benchmark runner](docs/benchmark_runner.md) executes the configured systems
 with isolated inputs, native output envelopes, request traces, immutable attempts,
@@ -312,11 +320,11 @@ saved executions and independent assessments for offline recomputation. Use
 reports require complete adjudicated reviews; progress reports show coverage
 without final performance claims. Historical tables remain unverified.
 
-Step 5 has begun with [real HaluEval preparation and a human handoff](docs/halueval_experiment_handoff.md):
-50 development and 100 test candidates, blank annotation packets, sentence
-offsets, and a five-record B0 execution smoke test. Human gold, independent
-reviews, a full retrieval index, and a live provider credential are still needed
-for measured pipeline results. Preparation tools do not manufacture annotations.
+[Real HaluEval preparation](docs/halueval_experiment_handoff.md) produced a
+50-development/100-test candidate cohort. Five development records have reviewed
+gold, completed live executions and adjudicated repair assessments. The remaining
+annotations and full benchmark are unfinished. See the
+[handoff](docs/project_handoff.md) for exact measured-artifact locations.
 
 For the reviewed five-record pilot, follow [the Colab instructions](docs/colab_reviewed_pilot.md)
 and open `notebooks/05_run_reviewed_pilot_colab.ipynb`. Reviewed evidence passages

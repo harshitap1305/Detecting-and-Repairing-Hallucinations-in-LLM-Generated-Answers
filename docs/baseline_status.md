@@ -1,5 +1,7 @@
 # Baseline reproducibility status
 
+> Historical audit snapshot. This page describes the earlier tracked-artifact check. A private five-record v4b pilot has since been human-reviewed and audited; see [the current handoff](project_handoff.md). The original historical benchmark tables remain unverified.
+
 As checked on 7 November 2026, this checkout contains the prompted pipeline code and
 unit tests, but not the minimum experiment artifacts needed to reproduce the
 numerical claims in `docs/evaluation_results_report.md` or

@@ -1,10 +1,12 @@
 # Implementation plan: defects exposed by the v3 pilot
 
-Status: phases 1–4 and phase 5 run preparation implemented with offline
-regression coverage. Phase 5 live execution, output inspection and new human
-assessment remain pending; follow `docs/colab_followup_v4.md`. Semantic
-checks and extraction-aware pipeline gating are model diagnostics, not independent
-factual evaluation. No new live run has been performed.
+Status (11 November 2026): phases 1–4 and the phase 5 execution workflow
+were implemented. v4 completed 7/10 outputs; the v4b recovery run completed 10/10
+and now has fresh human review, adjudication and an audited final bundle.
+Model extraction checks still accept some inadequate claims, and entity queries
+can contain noisy flattened metadata. These acceptance goals are not fully met.
+The later proposed entity-lead cleanup was reverted and is not part of the
+handoff. See [current results and open work](project_handoff.md).
 
 ## Scope and baseline
 
