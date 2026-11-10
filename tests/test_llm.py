@@ -80,5 +80,40 @@ class TestCacheRoundtrip(unittest.TestCase):
         self.assertIn("stats-model", stats["by_model"])
 
 
+class TestGroqReasoning(unittest.TestCase):
+    def test_gptoss_effective_budget_is_traced(self):
+        from unittest.mock import patch
+        from src.experiments.runtime import recorder
+        events = []
+        token = recorder.set(events.append)
+        try:
+            with patch.object(llm_module, "_call_groq", return_value="answer") as backend:
+                self.assertEqual(llm_module.call("fixture", model="openai/gpt-oss-120b",
+                                                 use_cache=False), "answer")
+                self.assertEqual(backend.call_args.args[3], 4096)
+            self.assertEqual(events[0]["max_tokens"], 4096)
+        finally:
+            recorder.reset(token)
+
+    def test_gptoss_request_and_empty_answer_diagnostics(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        response = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=""), finish_reason="length")],
+            usage=SimpleNamespace(completion_tokens=4096))
+        with patch("groq.Groq") as client:
+            create = client.return_value.chat.completions.create
+            create.return_value = response
+            with self.assertRaisesRegex(ValueError, "finish_reason=length"):
+                llm_module._call_groq("openai/gpt-oss-120b", "fixture", 0, 4096, 42)
+            self.assertEqual(create.call_args.kwargs["reasoning_effort"], "low")
+            self.assertFalse(create.call_args.kwargs["include_reasoning"])
+            response.choices[0].message.content = "final answer"
+            self.assertEqual(llm_module._call_groq("openai/gpt-oss-120b", "fixture", 0, 4096, 42),
+                             "final answer")
+            llm_module._call_groq("other-model", "fixture", 0, 1024, 42)
+            self.assertNotIn("reasoning_effort", create.call_args.kwargs)
+
+
 if __name__ == "__main__":
     unittest.main()

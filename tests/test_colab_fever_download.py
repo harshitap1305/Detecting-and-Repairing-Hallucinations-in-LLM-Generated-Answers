@@ -1,7 +1,11 @@
 """Exercise notebook download helpers without fetching the 1.7 GB archive."""
 import ast
+import contextlib
+import subprocess
+import sys
 import hashlib
 import io
+import os
 import json
 from pathlib import Path
 import tempfile
@@ -72,6 +76,28 @@ class TestColabFeverDownload(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Cached archive is invalid"):
             self.download(self.target, expected_md5=self.md5)
         self.assertEqual(self.target.read_text(), "not a zip")
+
+    def test_inspection_displays_child_traceback_before_raising(self):
+        path = Path(__file__).resolve().parents[1] / "notebooks/05_run_reviewed_pilot_colab.ipynb"
+        notebook = json.loads(path.read_text())
+        source = next("".join(cell["source"]) for cell in notebook["cells"]
+                      if cell["cell_type"] == "code" and "inspection = " in "".join(cell["source"]))
+        tree = ast.parse(source)
+        # Execute the actual notebook wrapper with a failing child, without
+        # requiring corpus files, model dependencies, or API credentials.
+        tree.body = [node for node in tree.body
+                     if not (isinstance(node, ast.Assign) and any(
+                         isinstance(target, ast.Name) and target.id == "inspection"
+                         for target in node.targets))]
+        namespace = {"inspection": "print('gold stage passed', flush=True); raise ValueError('fixture failure')",
+                     "subprocess": subprocess, "os": os, "PYTHON": sys.executable,
+                     "REPO": Path(self.temp.name)}
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            with self.assertRaisesRegex(RuntimeError, "Pilot inspection failed"):
+                exec(compile(tree, str(path), "exec"), namespace)
+        self.assertIn("gold stage passed", output.getvalue())
+        self.assertIn("ValueError: fixture failure", output.getvalue())
 
     def test_user_runtime_and_output_choices_are_preserved(self):
         path = Path(__file__).resolve().parents[1] / "notebooks/05_run_reviewed_pilot_colab.ipynb"

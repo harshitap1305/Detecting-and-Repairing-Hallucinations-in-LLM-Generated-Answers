@@ -127,14 +127,25 @@ def _call_groq(model: str, prompt: str, temperature: float,
     """Call Groq API. Requires GROQ_API_KEY env var."""
     from groq import Groq
     client = Groq(api_key=os.environ.get("GROQ_API_KEY"), base_url=endpoint_identity("groq"))
+    reasoning_options = ({"reasoning_effort": "low", "include_reasoning": False}
+                         if model in ("openai/gpt-oss-120b", "openai/gpt-oss-20b") else {})
     resp = client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": prompt}],
         temperature=temperature,
         max_tokens=max_tokens,
         seed=seed,
+        **reasoning_options,
     )
-    return resp.choices[0].message.content
+    choice = resp.choices[0]
+    content = choice.message.content
+    if not isinstance(content, str) or not content.strip():
+        usage = getattr(resp, "usage", None)
+        raise ValueError(
+            f"Empty Groq answer: model={model}, finish_reason={choice.finish_reason}, "
+            f"max_tokens={max_tokens}, completion_tokens={getattr(usage, 'completion_tokens', None)}"
+        )
+    return content
 
 
 def _call_openai(model: str, prompt: str, temperature: float,
@@ -210,6 +221,10 @@ def call(
     """
     if provider not in ("groq", "openai", "local"):
         raise ValueError(f"Unknown provider: {provider!r}")
+    # Reasoning consumes the completion budget before final answer text appears.
+    # Resolve before caching/tracing so artifacts record the actual token limit.
+    if provider == "groq" and model in ("openai/gpt-oss-120b", "openai/gpt-oss-20b"):
+        max_tokens = max(max_tokens, 4096)
     if run_seed.get() is not None:
         seed = run_seed.get() + seed - 42
     use_cache = use_cache and not bypass_cache.get()

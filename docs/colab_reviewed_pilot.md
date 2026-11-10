@@ -67,3 +67,48 @@ corpus, not a different dataset. Re-run the updated index cell after this error;
 there is no need to repeat annotation upload or environment setup in the same
 active Colab session. Existing valid indexes and verified archives are reused.
 The notebook retains the selected Python 3.12 environment and output paths.
+
+## Inspection cell errors
+
+A `CalledProcessError` alone only reports that the isolated Python process
+failed. The updated inspection cell captures and displays its combined output,
+including the underlying Python traceback and the last stage reached (gold
+validation, retrieval, or Groq access). Rerun that cell to diagnose the error;
+the index does not need to be rebuilt. Do not share API keys when reporting an
+error.
+
+If model availability fails, the inspection cell now prints the model IDs
+returned by your Groq account. Set `MODEL` at the top of that cell to an available
+text-generation model and rerun the cell. The benchmark explicitly receives the
+same model via `--model`; its execution manifest records the selection. A changed
+model requires a new run directory if a run has already started. Do not select
+speech, transcription, or moderation models for this text-generation benchmark.
+
+GPT-OSS calls use low reasoning effort and at least 4,096 completion tokens,
+including reasoning, to leave room for final answer text. The effective token
+limit is recorded in traces and cache keys. Empty Groq answers report their
+finish reason and token usage; reasoning text is never substituted for a verdict.
+After updating the client, use a new run directory (for example
+`pilot_repair_gptoss_v2`) with `RESUME = False`: the earlier incomplete run's code
+identity differs. Keep the old directory for diagnosis.
+
+## Downloaded pilot analysis
+
+The supplied Colab archive has been inspected locally. The successful repair run
+has all ten outputs (five dev answers each for B0 and the pipeline); its progress
+bundle passed offline audit, and reference metrics reproduced exactly. Analysis
+and model-authored review drafts are stored privately at
+`results/evaluation/colab_reviewed_pilot/analysis/report.md`, with citation notes,
+per-item drafts, artifact hashes and a human-review handoff. The source archive
+and original execution artifacts remain preserved.
+
+The pilot exposes a diagnostic limitation: three final decomposition responses
+mark the revised answer as not check-worthy, allowing self-verification SCR to
+rise to one without supported corrected claims. Those scores must not be read as
+successful factual repair. The model-authored drafts remain separate from the subsequently supplied human
+ratings. The completed reviewer A, reviewer B and adjudicator submissions were
+validated, imported and adjudicated. The final pilot bundle at
+`results/evaluation/colab_reviewed_pilot/pilot_final_v1/` passed offline audit with
+metric recomputation. Its `report.md` contains the final human-assessed outcomes;
+`analysis/final_audit_results.json` records submission hashes and provenance.
+Broader baseline and held-out test execution remain separate next phases.
