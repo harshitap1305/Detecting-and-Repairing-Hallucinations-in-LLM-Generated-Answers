@@ -23,13 +23,13 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from src.schema import AnswerRecord, Claim, EvidencePassage
 import src.llm as llm
-from src.guards import validate_repair_guards
-from src.decompose import split_sentences
+from src.guards import validate_repair_guards, check_grounded_improvement
+from src.decompose import split_sentences_with_spans
 
 
 # ─── Prompts ───────────────────────────────────────────────────────────────────
 
-_REPAIR_SYSTEM = """You are an expert factual editor. Your objective is to perform MINIMAL, SURGICAL edits to fix factual errors in a sentence using verified evidence.
+_REPAIR_SYSTEM = """You are an expert factual editor. Your objective is to perform MINIMAL, SURGICAL edits to fix factual errors in a sentence using inspected evidence candidates.
 
 CORE EDITING RULES:
 1. Fix ONLY the claims marked Contradicted or Unverifiable.
@@ -71,7 +71,7 @@ def _build_repair_prompt(
         f"Original sentence:\n  {sentence}\n\n"
         f"Supported claims that MUST NOT be altered:\n{supported_str}\n\n"
         f"Flagged claims that MUST be corrected:\n{flagged_str}\n\n"
-        f"Verified evidence passages:\n{evidence_str}\n\n"
+        f"Evidence candidate passages (not assumed true):\n{evidence_str}\n\n"
     )
 
     if rejection_feedback:
@@ -139,6 +139,7 @@ def repair(
     max_retries: int = 1,
     backend: str = "prompted",
     trained_model_path: Optional[str] = None,
+    guard_mode: str = "legacy",
 ) -> AnswerRecord:
     """
     Repair flagged sentences in AnswerRecord using evidence-grounded minimal edits with safety guards.
@@ -152,12 +153,21 @@ def repair(
         backend:      "prompted" or "trained" (Path C checkpoint).
         trained_model_path: Local checkpoint directory for the trained backend.
     """
+    if guard_mode not in ("legacy", "grounded_v1"):
+        raise ValueError("guard_mode must be legacy or grounded_v1")
+    if policy not in ("rewrite+hedge", "rewrite+remove", "rewrite-only"):
+        raise ValueError("Unknown repair policy")
+    if type(max_retries) is not int or not 0 <= max_retries <= 3:
+        raise ValueError("max_retries must be between 0 and 3")
     if backend not in ("prompted", "trained"):
         raise ValueError(f"Unknown repair backend: {backend!r}")
     if backend == "trained" and not trained_model_path:
         raise ValueError("trained_model_path is required for backend='trained'")
 
-    sentences = split_sentences(record.answer)
+    spans = split_sentences_with_spans(record.answer)
+    sentences = [s[0] for s in spans]
+    record.repair_diagnostics = {"semantics_version": 1, "kind": "model_guard_not_human_assessment", "guard_mode": guard_mode,
+                                 "policy": policy, "sentences": []}
     flagged_by_sid, supported_by_sid = _group_claims_by_sentence(record)
 
     if not flagged_by_sid:
@@ -176,8 +186,23 @@ def repair(
 
         flagged_here = flagged_by_sid[sid]
         supported_here = supported_by_sid.get(sid, [])
-        evidence_here = _collect_sentence_evidence(flagged_here)
+        evidence_here = _collect_sentence_evidence(flagged_here + supported_here)[:6]
+        diagnostic = {"sentence_id": sid, "flagged_claim_ids": [c.id for c in flagged_here],
+                      "attempts": [], "status": "unresolved"}
+        record.repair_diagnostics["sentences"].append(diagnostic)
+        def fallback():
+            # A blanket hedge/deletion cannot preserve supported facts' force.
+            if guard_mode == "grounded_v1" and supported_here:
+                return sentence
+            return _apply_fallback_policy(sentence, policy, bool(supported_here))
 
+        if guard_mode == "grounded_v1" and not evidence_here:
+            replacement = fallback()
+            diagnostic.update(status=("unchanged_unresolved" if replacement == sentence else
+                                      "deleted_unresolved" if not replacement else "hedged_unresolved"),
+                              stop_reason="no_replacement_evidence")
+            repaired_sentences.append(replacement)
+            continue
         accepted_edit = None
         rejection_reason = None
 
@@ -208,15 +233,24 @@ def repair(
                     prompt=prompt, model=model, provider=provider, temperature=temp
                 ).strip()
 
+            attempt_log = {"attempt": attempt + 1, "candidate": candidate, "accepted": False}
+            diagnostic["attempts"].append(attempt_log)
+            if candidate == sentence:
+                accepted_edit = sentence
+                diagnostic["status"] = "unchanged_unresolved"
+                attempt_log["reason"] = "no_change"
+                break
             # Deletion is only allowed by policy and when no supported claim in
             # the sentence would be lost.
             if candidate.upper() == "REMOVE" or not candidate:
                 if policy == "rewrite+remove" and not supported_here:
                     accepted_edit = ""
+                    diagnostic["status"] = "deleted_unresolved"
+                    attempt_log["accepted"] = True
                     break
                 rejection_reason = "Deletion would violate the repair policy or remove supported claims."
                 if attempt == attempts - 1:
-                    accepted_edit = _apply_fallback_policy(sentence, policy, bool(supported_here))
+                    accepted_edit = fallback()
                 continue
 
             # Strip accidental quotes
@@ -231,18 +265,42 @@ def repair(
                 evidence_passages=evidence_here,
             )
 
+            if guards_ok and guard_mode == "grounded_v1":
+                guards_ok, verdict = check_grounded_improvement(
+                    sentence, candidate, flagged_here, supported_here, evidence_here,
+                    model=model, provider=provider,
+                )
+                attempt_log["grounding_verdict"] = verdict
+                reason = verdict.get("rationale", verdict.get("reason", "No grounded improvement"))
+            attempt_log["reason"] = reason
             if guards_ok:
                 accepted_edit = candidate
+                diagnostic["status"] = "grounded_replacement" if guard_mode == "grounded_v1" else "legacy_guard_accepted"
+                attempt_log["accepted"] = True
                 break
             else:
                 rejection_reason = reason
                 if attempt == attempts - 1:
                     # All retries exhausted: apply fallback policy
-                    accepted_edit = _apply_fallback_policy(sentence, policy, bool(supported_here))
+                    accepted_edit = fallback()
 
-        if accepted_edit:
-            repaired_sentences.append(accepted_edit)
+        if accepted_edit is None:
+            accepted_edit = fallback()
+        if diagnostic["status"] == "unresolved":
+            diagnostic["status"] = ("unchanged_unresolved" if accepted_edit == sentence else
+                                    "deleted_unresolved" if not accepted_edit else "hedged_unresolved")
+            diagnostic["stop_reason"] = "guard_retries_exhausted"
+        repaired_sentences.append(accepted_edit)
 
-    record.repaired_answer = " ".join(s for s in repaired_sentences if s.strip())
+    # Apply sentence replacements to the original spans, preserving all untouched
+    # bytes and inter-sentence whitespace, including indentation/newlines.
+    pieces, cursor = [], 0
+    for (_, start, end), replacement in zip(spans, repaired_sentences):
+        pieces.extend([record.answer[cursor:start], replacement])
+        cursor = end
+    pieces.append(record.answer[cursor:])
+    record.repaired_answer = "".join(pieces)
+    if not record.repaired_answer.strip():
+        record.repaired_answer = ""
     record.repair_iterations = max(1, record.repair_iterations)
     return record

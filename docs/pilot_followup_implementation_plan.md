@@ -1,7 +1,8 @@
 # Implementation plan: fixes identified by the reviewed development pilot
 
-Status: phases 1–4 implemented with offline regression coverage; phases 5–6
-remain planned. A new live development run has not yet been performed.
+Status: phases 1–5 and phase 6 software/workflow implemented with offline
+regression coverage. Phase 6 live execution, new human assessments and the new
+final bundle remain pending in Colab; no new model performance is claimed.
 
 ## Evidence and scope
 

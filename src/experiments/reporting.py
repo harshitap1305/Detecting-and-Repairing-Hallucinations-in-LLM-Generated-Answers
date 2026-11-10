@@ -222,7 +222,7 @@ def build_bundle(*, run_dir: Path, gold_path: Path, output_dir: Path, assessment
             metrics, comparisons, evaluations, coverage = _products(run, gold, assessments, mode, n_bootstrap, seed)
             snapshot = staging / "execution"
             snapshot.mkdir()
-            for name in ("manifest.json",):
+            for name in ("manifest.json", *run["manifest"].get("reproduction_files_sha256", {})):
                 shutil.copyfile(run_dir / name, snapshot / name)
             for name in ("attempts", "traces", "outputs"):
                 # Reject links rather than following a source artifact outside the run.

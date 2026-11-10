@@ -86,13 +86,14 @@ class AnswerRecord:
     decomposition_diagnostics: Optional[dict] = None
     claim_tracking: Optional[dict] = None
     retrieval_diagnostics: Optional[dict] = None
+    repair_diagnostics: Optional[dict] = None
 
     # ── serialization ──────────────────────────────────────────────────────────
 
     def to_dict(self) -> dict:
         result = asdict(self)
         # Absent diagnostics must not change historical gold/output fingerprints.
-        for name in ("verification_diagnostics", "decomposition_diagnostics", "claim_tracking", "retrieval_diagnostics"):
+        for name in ("verification_diagnostics", "decomposition_diagnostics", "claim_tracking", "retrieval_diagnostics", "repair_diagnostics"):
             if result[name] is None:
                 result.pop(name)
         return result

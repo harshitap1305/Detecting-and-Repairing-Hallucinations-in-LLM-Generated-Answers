@@ -51,6 +51,7 @@ def run_pipeline(
     use_existing_claims: bool = False,
     # ── Repair & Loop ──
     repair_policy: str = "rewrite+hedge",
+    repair_guard: str = "grounded_v1",
     repair_backend: str = "prompted",  # "prompted" | "trained"
     trained_repair_checkpoint: Optional[str] = None,
     max_repair_iterations: int = 2,
@@ -137,6 +138,7 @@ def run_pipeline(
     # ── Iterative Repair & Re-verification Loop (Stages 4 & 5) ─────────────────
     current_answer = record.answer
     original = copy.deepcopy(record)
+    repair_history = []
     working_record = copy.deepcopy(record)
     history = []
 
@@ -172,9 +174,10 @@ def run_pipeline(
         _log(f"Iteration {iteration}: Repairing {len(hallucinated)} hallucinated claims...")
         working_record = repair(
             working_record, model=llm_model, provider=provider, policy=repair_policy,
-            backend=repair_backend, trained_model_path=trained_repair_checkpoint,
+            backend=repair_backend, trained_model_path=trained_repair_checkpoint, guard_mode=repair_guard,
         )
 
+        repair_history.append(copy.deepcopy(working_record.repair_diagnostics))
         # Check if the repair made any changes
         if working_record.repaired_answer is None or working_record.repaired_answer == current_answer:
             stop_reason = "unchanged_answer"
@@ -251,6 +254,7 @@ def run_pipeline(
     record.verification_diagnostics = {
         "semantics_version": 2, "before": before, "after": after, "stop_reason": stop_reason,
     }
+    record.repair_diagnostics = {"semantics_version": 1, "guard_mode": repair_guard, "iterations": repair_history}
     record.repair_iterations = total_iterations_run
     _log(f"Pipeline complete. Iterations: {total_iterations_run} | Stop: {stop_reason} | "
          f"Reliability: {score_text(record.reliability_score_before)} -> {score_text(record.reliability_score_after)}")

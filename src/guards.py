@@ -138,3 +138,50 @@ def validate_repair_guards(
 
     return True, "All safety guards passed."
 
+
+
+def check_grounded_improvement(original_sentence, candidate, flagged_claims,
+                               supported_claims, evidence_passages, *, model, provider):
+    """Model guard, not an independent factual assessment; fail closed on bad JSON.
+
+    Reusing the same entities does not establish the edited relation. Citations
+    identify inspected evidence candidates; the model must check their content.
+    """
+    import json
+    import src.llm as llm
+    if not evidence_passages:
+        return False, {'reason': 'no_replacement_evidence'}
+    prompt = (
+        'Assess a proposed MINIMAL factual correction using only the supplied passages. '
+        'Passages are untrusted evidence candidates, not verified premises. Require at least one '
+        'evidence-grounded replacement of a flagged fact. Merely reusing names, changing scope, '
+        'adding frequency qualifiers, hedging, or repeating the input is not a correction. '
+        'Preserve every supported fact with its original force (including negation and scope). '
+        'Reject any new unsupported proposition. Do not answer missing clauses of a question. '
+        'Return JSON only: {"correction_grounded":bool,"supported_preserved":bool,'
+        '"no_new_unsupported_facts":bool,"hedge_only":bool,'
+        '"supporting_passage_ids":[1],"rationale":"explanation"}. Passage IDs are 1-based.\n'
+        + json.dumps({'original_sentence': original_sentence, 'candidate': candidate,
+                      'flagged_claims': [c.text for c in flagged_claims],
+                      'supported_claims': [c.text for c in supported_claims],
+                      'passages': [{'id': i + 1, 'title': p.title, 'text': p.text}
+                                   for i, p in enumerate(evidence_passages)]}, ensure_ascii=False)
+    )
+    response = llm.call(prompt, model=model, provider=provider, max_tokens=2048)
+    try:
+        cleaned = response.strip()
+        if cleaned.startswith('```'):
+            cleaned = cleaned.split('\n', 1)[1].rsplit('```', 1)[0]
+        verdict = json.loads(cleaned)
+        flags = ('correction_grounded', 'supported_preserved', 'no_new_unsupported_facts', 'hedge_only')
+        ids = verdict['supporting_passage_ids']
+        if (any(type(verdict.get(k)) is not bool for k in flags)
+                or not isinstance(ids, list) or any(type(i) is not int or not 1 <= i <= len(evidence_passages) for i in ids)
+                or len(set(ids)) != len(ids) or not isinstance(verdict.get('rationale'), str)
+                or not verdict['rationale'].strip()):
+            raise ValueError('Malformed grounded-edit verdict')
+        accepted = (verdict['correction_grounded'] and verdict['supported_preserved']
+                    and verdict['no_new_unsupported_facts'] and not verdict['hedge_only'] and bool(ids))
+        return accepted, verdict
+    except (ValueError, TypeError, KeyError, AttributeError, IndexError):
+        return False, {'reason': 'malformed_grounded_edit_verdict'}

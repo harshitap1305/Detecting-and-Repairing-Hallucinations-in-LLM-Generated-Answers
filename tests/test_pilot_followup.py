@@ -120,6 +120,7 @@ def test_historical_serialization_and_recorded_score_remain_unchanged():
     old.pop('decomposition_diagnostics')
     old.pop('claim_tracking')
     old.pop('retrieval_diagnostics')
+    old.pop('repair_diagnostics')
     assert r.to_dict() == old
     # Historical stored 1.0 is read as stored, not reinterpreted retroactively.
     r.reliability_score_after = 1.

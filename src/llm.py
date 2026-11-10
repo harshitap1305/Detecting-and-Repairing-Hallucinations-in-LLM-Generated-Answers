@@ -29,7 +29,7 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Optional
 
-from src.experiments.runtime import recorder, run_seed, strict, bypass_cache, model_revision
+from src.experiments.runtime import recorder, run_seed, strict, bypass_cache, model_revision, request_settings
 
 
 # ─── Cache ────────────────────────────────────────────────────────────────────
@@ -42,13 +42,38 @@ def _make_key(model: str, prompt: str, temperature: float,
               max_tokens: int, seed: int, provider: str = "groq",
               endpoint: Optional[str] = None) -> str:
     payload = json.dumps(
-        {"cache_schema": 2, "provider": provider, "endpoint": endpoint or endpoint_identity(provider),
+        {"cache_schema": 3, "provider": provider, "endpoint": endpoint or endpoint_identity(provider),
          "model": model, "prompt": prompt, "temperature": temperature,
          "max_tokens": max_tokens, "seed": seed,
+         "backend_parameters": backend_parameters(model, provider),
          "revision": model_revision.get() if provider == "local" else None},
         sort_keys=True,
     )
     return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def backend_parameters(model: str, provider: str) -> dict:
+    if provider == "groq" and model in ("openai/gpt-oss-120b", "openai/gpt-oss-20b"):
+        effort = (request_settings.get() or {}).get("reasoning_effort", "low")
+        if effort not in ("low", "medium", "high"):
+            raise ValueError("GPT-OSS reasoning_effort must be low, medium or high")
+        return {"reasoning_effort": effort, "include_reasoning": False}
+    return {}
+
+
+def _completion_metadata(resp, provider, model):
+    usage = getattr(resp, "usage", None)
+    counts = {}
+    for name in ("prompt_tokens", "completion_tokens", "total_tokens"):
+        value = getattr(usage, name, None)
+        counts[name] = value if type(value) is int else None
+    value = getattr(getattr(usage, "completion_tokens_details", None), "reasoning_tokens", None)
+    counts["reasoning_tokens"] = value if type(value) is int else None
+    callback = recorder.get()
+    if callback:
+        callback({"event": "completion_metadata", "provider": provider, "model": model,
+                  "finish_reason": getattr(resp.choices[0], "finish_reason", None), "usage": counts,
+                  "cache_hit": False})
 
 
 def endpoint_identity(provider: str) -> str:
@@ -127,8 +152,7 @@ def _call_groq(model: str, prompt: str, temperature: float,
     """Call Groq API. Requires GROQ_API_KEY env var."""
     from groq import Groq
     client = Groq(api_key=os.environ.get("GROQ_API_KEY"), base_url=endpoint_identity("groq"))
-    reasoning_options = ({"reasoning_effort": "low", "include_reasoning": False}
-                         if model in ("openai/gpt-oss-120b", "openai/gpt-oss-20b") else {})
+    reasoning_options = backend_parameters(model, "groq")
     resp = client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": prompt}],
@@ -137,6 +161,9 @@ def _call_groq(model: str, prompt: str, temperature: float,
         seed=seed,
         **reasoning_options,
     )
+    if not resp.choices:
+        raise ValueError("Groq returned no completion choices")
+    _completion_metadata(resp, "groq", model)
     choice = resp.choices[0]
     content = choice.message.content
     if not isinstance(content, str) or not content.strip():
@@ -160,6 +187,7 @@ def _call_openai(model: str, prompt: str, temperature: float,
         max_tokens=max_tokens,
         seed=seed,
     )
+    _completion_metadata(resp, "openai", model)
     return resp.choices[0].message.content
 
 
@@ -224,7 +252,10 @@ def call(
     # Reasoning consumes the completion budget before final answer text appears.
     # Resolve before caching/tracing so artifacts record the actual token limit.
     if provider == "groq" and model in ("openai/gpt-oss-120b", "openai/gpt-oss-20b"):
-        max_tokens = max(max_tokens, 4096)
+        minimum = (request_settings.get() or {}).get("gptoss_min_completion_tokens", 4096)
+        if type(minimum) is not int or not 1024 <= minimum <= 65536:
+            raise ValueError("gptoss_min_completion_tokens must be between 1024 and 65536")
+        max_tokens = max(max_tokens, minimum)
     if run_seed.get() is not None:
         seed = run_seed.get() + seed - 42
     use_cache = use_cache and not bypass_cache.get()
@@ -238,6 +269,7 @@ def call(
             callback({"provider": provider, "endpoint": endpoint_identity(provider),
                       "model": model, "prompt": prompt, "response": response,
                       "temperature": temperature, "max_tokens": max_tokens,
+                      "backend_parameters": backend_parameters(model, provider),
                       "seed": seed, "cache_hit": cached,
                       "revision": model_revision.get() if provider == "local" else None})
         if strict.get() and not response.strip():
@@ -267,10 +299,10 @@ def call(
                       "error": {"type": type(exc).__name__, "message": str(exc)}})
         raise
 
+    result = record_response(response, False)
     if use_cache:
         _cache_set(key, model, response)
-
-    return record_response(response, False)
+    return result
 
 
 def reset_connection() -> None:

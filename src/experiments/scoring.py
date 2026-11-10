@@ -66,6 +66,8 @@ def load_run(directory: Path, gold: dict, *, allow_partial=False) -> dict:
     from src.experiments.protocol import validate_config
     directory = directory.resolve()
     manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
+    from src.experiments.provenance import validate_reproduction
+    validate_reproduction(directory, manifest)
     identity = manifest["identity"]
     if manifest.get("schema_version") != 1 or identity.get("schema_version") != 1:
         raise ValueError("Unsupported run schema")

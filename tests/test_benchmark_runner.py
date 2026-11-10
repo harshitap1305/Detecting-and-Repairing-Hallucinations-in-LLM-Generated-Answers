@@ -75,6 +75,14 @@ class TestBenchmarkRunner(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Resume identity changed"):
             run_benchmark(**self.kwargs, resume=True, options={"retrieval_max_queries": 4})
 
+    def test_modified_generating_source_snapshot_prevents_resume(self):
+        run_benchmark(**self.kwargs)
+        source = self.root / "run/source.zip"
+        self.assertTrue(source.is_file())
+        source.write_bytes(b"modified source snapshot")
+        with self.assertRaisesRegex(ValueError, "snapshot changed"):
+            run_benchmark(**self.kwargs, resume=True)
+
     def test_failure_remains_visible_and_retry_does_not_repeat_success(self):
         from src.experiments.adapters import execute
         calls = []

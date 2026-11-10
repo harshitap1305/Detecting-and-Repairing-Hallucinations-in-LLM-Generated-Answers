@@ -112,3 +112,11 @@ validated, imported and adjudicated. The final pilot bundle at
 metric recomputation. Its `report.md` contains the final human-assessed outcomes;
 `analysis/final_audit_results.json` records submission hashes and provenance.
 Broader baseline and held-out test execution remain separate next phases.
+
+## Next live development run
+
+Use [the follow-up v3 handoff](colab_followup_v3.md) and the updated notebook for
+phases 5–6. The conservative repair profile, generating-source snapshots, explicit
+reasoning settings, stage diagnostics and small result export are implemented.
+A fresh live run and new independent human repair ratings are still needed to
+measure improvement; earlier pilot outputs and assessments remain preserved.

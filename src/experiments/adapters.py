@@ -21,6 +21,7 @@ def execute(system: dict, record: AnswerRecord, task: str, options: dict) -> dic
         "faiss_index_path": options.get("faiss_index_path"),
         "passages_path": options.get("passages_path"),
         "repair_policy": options["repair_policy"],
+        "repair_guard": options.get("repair_guard", "grounded_v1"),
         "query_strategy": options.get("query_strategy", "contextual_v1"),
         "retrieval_max_queries": options.get("retrieval_max_queries", 3),
         "retrieval_max_passages": options.get("retrieval_max_passages", 20),

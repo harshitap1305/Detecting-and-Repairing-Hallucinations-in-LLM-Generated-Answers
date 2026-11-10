@@ -29,7 +29,8 @@ DEFAULTS = {"provider": "groq", "model": "llama-3.3-70b-versatile", "model_revis
             "repair_policy": "rewrite+hedge", "n_samples": 5, "consistency_threshold": 0.5,
             "faiss_index_path": None, "passages_path": None,
             "query_strategy": "contextual_v1", "retrieval_max_queries": 3,
-            "retrieval_max_passages": 20, "tracking_max_claims": 64}
+            "retrieval_max_passages": 20, "tracking_max_claims": 64, "repair_guard": "grounded_v1",
+            "reasoning_effort": "low", "gptoss_min_completion_tokens": 4096}
 
 
 def now():
@@ -37,11 +38,8 @@ def now():
 
 
 def code_identity() -> dict:
-    files = [path for folder in ("src", "scripts") for path in (ROOT / folder).rglob("*.py")]
-    files += [path for path in (ROOT / "configs").rglob("*.yaml")]
-    files += [ROOT / "docs/evaluation_protocol.md", ROOT / "docs/annotation_guidelines.md"]
-    files += list(ROOT.glob("requirements*.txt"))
-    hashes = {str(path.relative_to(ROOT)): file_hash(path) for path in sorted(files)}
+    from src.experiments.provenance import source_hashes
+    hashes = source_hashes(ROOT)
     def git(*args):
         result = subprocess.run(["git", *args], cwd=ROOT, text=True, capture_output=True)
         if result.returncode:
@@ -89,6 +87,12 @@ def resolve_options(config_path: Path, config: dict, options: dict | None) -> di
     for key in ("top_k", "n_samples", "max_repair_iterations"):
         if type(result[key]) is not int or result[key] < 1:
             raise ValueError(f"{key} must be a positive integer")
+    if result["repair_guard"] not in ("legacy", "grounded_v1"):
+        raise ValueError("repair_guard must be legacy or grounded_v1")
+    if result["reasoning_effort"] not in ("low", "medium", "high"):
+        raise ValueError("reasoning_effort must be low, medium or high")
+    if type(result["gptoss_min_completion_tokens"]) is not int or not 1024 <= result["gptoss_min_completion_tokens"] <= 65536:
+        raise ValueError("gptoss_min_completion_tokens must be between 1024 and 65536")
     if result["repair_policy"] not in ("rewrite+hedge", "rewrite+remove", "rewrite-only"):
         raise ValueError("Unsupported repair policy")
     if (type(result["consistency_threshold"]) not in (int, float)
@@ -248,7 +252,9 @@ def run_benchmark(*, config_path: Path, inputs_path: Path, splits_path: Path,
     assets = preflight(systems, resolved)
     segmenter = require_segmenter(config)
     inventories = read_inventory(inventory_path, records, segmenter) if inventory_path else {}
-    identity = {"schema_version": 1, "config": config, "config_sha256": file_hash(config_path),
+    from src.experiments.provenance import freeze_environment, save_reproduction, validate_reproduction
+    identity = {"schema_version": 1,
+                "reproduction_environment_sha256": fingerprint(freeze_environment()), "config": config, "config_sha256": file_hash(config_path),
                 "options": resolved, "task": task, "split": split,
                 "endpoint": endpoint_identity(resolved["provider"]),
                 "input_sha256": file_hash(inputs_path), "splits_sha256": file_hash(splits_path),
@@ -270,13 +276,16 @@ def run_benchmark(*, config_path: Path, inputs_path: Path, splits_path: Path,
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             if manifest.get("run_id") != run_id or manifest.get("identity") != identity:
                 raise ValueError("Resume identity changed (inputs, code, model, settings, or environment)")
+            validate_reproduction(output_dir, manifest)
         else:
             for folder in ("attempts", "outputs", "traces"):
                 (output_dir / folder).mkdir()
+            reproduction = save_reproduction(ROOT, output_dir, identity)
             manifest = {"schema_version": 1, "run_id": run_id, "identity": identity,
+                        "reproduction_files_sha256": reproduction,
                         "created_utc": now(), "benchmark_complete": False,
                         "cache_policy": "run-local SQLite; B2 sampling and retried failed records bypass LLM cache",
-                        "token_usage": "not collected by legacy backends",
+                        "token_usage": "completion_metadata trace events; cached responses do not incur new usage",
                         "dirty_worktree": bool(subprocess.run(["git", "status", "--porcelain"],
                             cwd=ROOT, capture_output=True, text=True).stdout.strip()),
                         "note": "Execution only; independent evaluation and metrics are separate."}
@@ -332,7 +341,8 @@ def run_benchmark(*, config_path: Path, inputs_path: Path, splits_path: Path,
                                 pass
                             try:
                                 with execution(record=record_call, seed=seed, refresh=attempt > 1,
-                                               revision=resolved["model_revision"] if resolved["provider"] == "local" else None):
+                                               revision=resolved["model_revision"] if resolved["provider"] == "local" else None,
+                                               settings=resolved):
                                     payload = adapters.execute(system, fresh, task, resolved)
                                 if not isinstance(payload, dict) or set(payload) != {
                                         "record", "native", "retrieved_evidence"}:
