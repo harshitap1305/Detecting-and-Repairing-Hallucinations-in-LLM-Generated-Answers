@@ -26,6 +26,7 @@ import os
 import pickle
 import re
 import sqlite3
+import unicodedata
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -361,29 +362,93 @@ def _context_reason(claim, candidates, top_k):
     return None
 
 
-def _linked_entities(passages, already_known, context=""):
-    """Deterministic entity hypotheses drawn only from inspected passages.
+ENTITY_PLANNER_VERSION = 2
 
-    A textual mention is a retrieval lead, not proof of a relationship. Support
-    wiki-style links and proper-name phrases; keep the exact originating span.
-    """
+
+def _entity_text(text):
+    text = unicodedata.normalize("NFKC", text)
+    for encoded, plain in (("-LRB-", "("), ("-RRB-", ")"), ("-COLON-", ":"),
+                           ("-LSB-", "["), ("-RSB-", "]")):
+        text = text.replace(encoded, plain)
+    return " ".join(text.replace("_", " ").replace("’", "'").replace("‘", "'")
+                    .replace("–", "-").replace("—", "-").split())
+
+
+def _entity_key(text):
+    return re.sub(r"^the\s+", "", _entity_text(text).casefold())
+
+
+def _body_region(passage):
+    # Match only the builder's known title, not an arbitrary first sentence.
+    # Keep original character coordinates; never rewrite the stored passage.
+    prefix = re.match(r"^\s*Title:\s*" + re.escape(passage.title)
+                      + r"(?:\.(?:[ \t]+|\r?\n|$)|[ \t]*\r?\n|[ \t]*$)", passage.text, re.I)
+    return (prefix.end() if prefix else 0), len(passage.text)
+
+
+def _proper_name_mentions(text):
+    tokens = list(re.finditer(r"[^\W\d_][\w'’‘-]*(?:-[^\W\d_][\w'’‘-]*)*", text, re.UNICODE))
+    connectors = {"of", "the", "and", "de", "van", "von", "la", "le", "da"}
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        if not token.group()[0].isupper():
+            i += 1
+            continue
+        end, j, last_name = token.end(), i + 1, i
+        while j < len(tokens):
+            gap = text[tokens[j - 1].end():tokens[j].start()]
+            word = tokens[j].group()
+            if not gap.isspace() or not (word[0].isupper() or word.casefold() in connectors):
+                break
+            if word[0].isupper():
+                end, last_name = tokens[j].end(), j
+            j += 1
+        yield token.start(), end
+        i = last_name + 1
+
+
+def _linked_entities(passages, already_known, context="", decisions=None):
+    """Select body mentions, retaining exact source spans and selection reasons."""
+    log = decisions if decisions is not None else []
+    known = {_entity_key(title) for title in already_known}
+    context_terms, context_key = _query_terms(_entity_text(context)), _entity_key(context)
+    candidates = []
+    for rank, passage in enumerate(passages):
+        start, end = _body_region(passage)
+        if start:
+            log.append({"source_doc_id": passage.doc_id, "source_span": [0, start],
+                        "decision": "rejected", "reason": "structured_title_header"})
+        body = passage.text[start:end]
+        mentions = [(m.start(1), m.end(1), "explicit_link") for m in
+                    re.finditer(r"\[\[([^]\n|]+)(?:\|[^]\n]+)?\]\]", body)]
+        mentions += [(a, b, "proper_name") for a, b in _proper_name_mentions(body)]
+        for a, b, kind in mentions:
+            entity = body[a:b]
+            key = _entity_key(entity)
+            terms = _query_terms(_entity_text(entity))
+            relation = bool(re.search(r"\b(for|in|at|from|by|called|named)\W*$", body[max(0, a - 50):a], re.I))
+            lead = {"entity": entity, "query_entity": _entity_text(entity),
+                    "source_doc_id": passage.doc_id, "source_span": [start + a, start + b],
+                    "mention_kind": kind, "selection_reason": ("explicit_link" if kind == "explicit_link" else
+                        "shared_target_term" if terms & context_terms else "relation_context" if relation else "body_proper_name")}
+            reason = ("too_short_or_function_word" if len(key) < 3 or not terms else
+                      "known_article" if key in known else
+                      "already_in_context" if re.search(r"(?<!\w)" + re.escape(key) + r"(?!\w)", context_key)
+                      or terms <= context_terms else None)
+            if reason:
+                log.append({**lead, "decision": "rejected", "reason": reason})
+            else:
+                candidates.append(((kind != "explicit_link", -len(terms & context_terms), not relation,
+                                    rank, a, -(b - a)), key, lead))
     seen = set()
-    for passage in passages:
-        patterns = (r"\[\[([^]\n|]+)(?:\|[^]\n]+)?\]\]",
-                    r"\b([A-Z][\w'-]+(?:[ ]+(?:[A-Z][\w'-]+|of|the|and)){0,4})")
-        matches = sorted(((priority, m) for priority, pattern in enumerate(patterns)
-                          for m in re.finditer(pattern, passage.text)),
-                         key=lambda pair: (pair[0], pair[1].start(), -len(pair[1].group(1))))
-        for _, match in matches:
-            entity = match.group(1).strip()
-            normalized = entity.casefold().replace('_', ' ')
-            if (len(entity) < 3 or normalized in seen or normalized in already_known
-                    or normalized in _QUERY_STOP
-                    or re.search(r"\b" + re.escape(normalized) + r"\b", context.casefold())):
-                continue
-            seen.add(normalized)
-            yield {"entity": entity, "source_doc_id": passage.doc_id,
-                   "source_span": [match.start(1), match.end(1)]}
+    for _, key, lead in sorted(candidates, key=lambda row: row[0]):
+        if key in seen:
+            log.append({**lead, "decision": "rejected", "reason": "duplicate_normalized_mention"})
+            continue
+        seen.add(key)
+        log.append({**lead, "decision": "eligible", "reason": lead["selection_reason"]})
+        yield lead
 
 
 def _fetch_query(query, index_path, method, fetch_k, faiss_index_path, passages_path, encoder_name):
@@ -434,7 +499,8 @@ def retrieve(
     if base_method not in ("bm25", "fts5", "dense", "hybrid"):
         raise ValueError(f"Unknown retrieval method: {method!r}")
     settings = {"version": 1, "strategy": query_strategy, "max_queries": max_queries,
-                "max_passages": max_passages, "top_k": top_k}
+                "max_passages": max_passages, "top_k": top_k,
+                "entity_planner_version": ENTITY_PLANNER_VERSION}
     scope = json.dumps({"method": method, "index": _index_identity(index_path),
                         "faiss": _index_identity(faiss_index_path),
                         "passages": _index_identity(passages_path), "question": record.question,
@@ -463,7 +529,7 @@ def retrieve(
             query = " ".join(query.split())
             if (not query or query.casefold() in seen_queries or len(query_log) >= max_queries
                     or fetched >= max_passages):
-                return
+                return False
             seen_queries.add(query.casefold())
             remaining = max_passages - fetched
             if query_strategy == "contextual_v1":
@@ -489,19 +555,23 @@ def retrieve(
             query_log.append({"query": query, "kind": kind, "link": link,
                               "cache_hit": cache_hit, "limit": limit,
                               "passages": [p.__dict__.copy() for p in rows]})
+            return True
 
         if not query_log:
             run_query(claim.text, "claim")
+        lead_decisions = copy.deepcopy(old.get("lead_decisions", [])) if old else []
         trigger = _context_reason(claim, rankings[0] if rankings else [], top_k)
         if query_strategy == "contextual_v1" and trigger:
             run_query(f"{record.question} {claim.text}", "question_context")
             seeds = [p for q, rows in zip(query_log, rankings)
                      if q["kind"] != "linked_entity" for p in rows]
             known = {p.title.casefold().replace('_', ' ') for p in seeds}
-            for lead in _linked_entities(seeds, known, record.question + " " + claim.text):
+            for lead in _linked_entities(seeds, known, record.question + " " + claim.text, lead_decisions):
                 # Attribute terms remain from the fixed target/question. An
                 # entity mention is not asserted as a verified bridge fact.
-                run_query(f"{lead['entity']} {claim.text} {record.question}", "linked_entity", lead)
+                queried = run_query(f"{lead['query_entity']} {claim.text} {record.question}", "linked_entity", lead)
+                lead_decisions.append({**lead, "decision": "queried" if queried else "not_queried",
+                                       "reason": "query_added" if queried else "query_or_passage_budget_exhausted"})
                 if len(query_log) >= max_queries or fetched >= max_passages:
                     break
         scores, passages = {}, {}
@@ -523,7 +593,7 @@ def retrieve(
                           if rerank else candidates[:top_k])
         diagnostics['claims'].append({"claim_id": claim.id, "target": claim.text,
             "trigger": trigger if query_strategy == "contextual_v1" else None,
-            "queries": query_log, "fetched_passages": fetched, "unique_candidates": len(candidates),
+            "queries": query_log, "lead_decisions": lead_decisions, "fetched_passages": fetched, "unique_candidates": len(candidates),
             "selected": [{"doc_id": p.doc_id, "chunk_id": p.chunk_id} for p in claim.evidence]})
     record.retrieval_diagnostics = diagnostics
     callback = recorder.get()

@@ -263,3 +263,23 @@ reused. Example additional options for the next development run:
 --query-strategy contextual_v1 --retrieval-max-queries 3 \
 --retrieval-max-passages 20 --tracking-max-claims 64
 ```
+
+## Entity planner version 2 and proposed answer attribution
+
+The contextual workflow now records `entity_planner_version: 2` in retrieval
+settings and cache scope. It recognizes the corpus builder's exact `Title: ...`
+prefix, selects entity leads from the remaining body, and retains offsets into
+the original stored text. Header labels are excluded by source region, not by a
+global word blacklist. Explicit links and body names are prioritized by target
+terms and relation context; apostrophes, Unicode, hyphens and FEVER title encoding
+are normalized for query/alias deduplication. `entity` remains the exact source
+slice; `query_entity` is its normalized search form. Lead diagnostics explain
+header/known/context/duplicate rejections and whether a lead consumed a query.
+No usable lead means no fabricated query. Query/passage caps remain unchanged,
+and the existing index can be reused without rebuilding it.
+
+Decomposition also records the [answer attribution contract](answer_attribution.md).
+It names question relationships, original answer spans, borrowed referent/context
+spans and ambiguous or unanswered clauses. Structural validation does not establish
+semantic correctness. Missing old annotations remain explicit unknown coverage;
+the semantic checker and success-state gate remain later implementation phases.

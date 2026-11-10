@@ -184,9 +184,9 @@ def test_sqlite_fts_context_and_link_queries_use_same_corpus(tmp_path):
     db = tmp_path / 'corpus.sqlite'
     rows = [
         {'doc_id': 'person', 'title': 'Mira Vale', 'chunk_id': 0,
-         'text': 'Mira Vale writes for [[Northbridge Review]].'},
+         'text': 'Title: Mira Vale. Mira Vale writes for [[Northbridge Review]].'},
         {'doc_id': 'magazine', 'title': 'Northbridge Review', 'chunk_id': 0,
-         'text': 'Northbridge Review is a news magazine published monthly.'},
+         'text': 'Title: Northbridge Review. Northbridge Review is a news magazine published monthly.'},
         {'doc_id': 'other', 'title': 'Other Review', 'chunk_id': 0,
          'text': 'Other Review is published every day.'},
     ]
@@ -210,3 +210,66 @@ def test_in_memory_lexical_index_is_reloaded_when_file_changes(index):
         Path(index).write_bytes(b'changed index file size')
         assert retrieval._load_bm25(index)[0] == 'new'
         assert load.call_count == 2
+
+
+def test_index_title_header_is_not_an_entity_and_unicode_mention_offsets_are_exact():
+    p = passage(title='Mira_Vale', text="Title: Mira_Vale. Mira Vale was a reporter for L’Obs.")
+    decisions = []
+    leads = list(retrieval._linked_entities([p], {'Mira_Vale'}, 'Mira Vale magazine frequency', decisions))
+    assert leads[0]['entity'] == 'L’Obs'
+    assert leads[0]['query_entity'] == "L'Obs"
+    assert not any(lead['entity'] == 'Title' for lead in leads)
+    for lead in leads:
+        a, b = lead['source_span']
+        assert p.text[a:b] == lead['entity']
+    assert any(d['reason'] == 'structured_title_header' for d in decisions)
+
+
+def test_header_only_and_empty_passages_do_not_invent_an_entity():
+    for text in ('', 'Title: Mira_Vale.', 'Title: Mira_Vale.  ', 'Title: Mira_Vale\n', 'Title: Mira_Vale  '):
+        assert list(retrieval._linked_entities([passage(title='Mira_Vale', text=text)], set())) == []
+
+
+def test_actual_word_title_in_article_body_is_not_globally_blacklisted():
+    p = passage(title='A novelist', text='Title: A novelist. Her novel was named Title.')
+    leads = list(retrieval._linked_entities([p], {'A novelist'}, 'Her novel'))
+    assert any(lead['entity'] == 'Title' for lead in leads)
+
+
+def test_repeated_fever_aliases_do_not_consume_multiple_lead_slots():
+    p = passage(text="See [[Élodie_Review_-LRB-magazine-RRB-]]. Also [[Élodie Review (magazine)]].")
+    decisions = []
+    leads = list(retrieval._linked_entities([p, p], set(), '', decisions))
+    explicit = [lead for lead in leads if lead['mention_kind'] == 'explicit_link']
+    assert len(explicit) == 1
+    assert explicit[0]['query_entity'] == 'Élodie Review (magazine)'
+    assert any(d['reason'] == 'duplicate_normalized_mention' for d in decisions)
+
+
+def test_relevant_unicode_body_name_is_prioritized_over_sentence_start():
+    p = passage(text='Title: Mira Vale. Other Things happened. She writes for Élodie-Ann Review.')
+    leads = list(retrieval._linked_entities([p], {'Mira Vale'}, 'Which Review publishes the report?'))
+    assert leads[0]['entity'] == 'Élodie-Ann Review'
+
+
+def test_formatted_person_to_publication_query_fits_original_budget(index):
+    r = record()
+    seed = passage(title='Mira_Vale', text="Title: Mira_Vale. Mira Vale writes for L'Obs.")
+    def fetch(query, index_path, top_k):
+        if query.startswith("L'Obs"):
+            return [passage('publication', "L'Obs", "Title: L'Obs. The magazine is published monthly.")]
+        return [seed]
+    with patch('src.retrieve.retrieve_bm25', side_effect=fetch) as backend:
+        retrieval.retrieve(r, index, top_k=2, use_cache=False, query_strategy='contextual_v1')
+    assert backend.call_count == 3
+    assert {p.doc_id for p in r.claims[0].evidence} == {'person', 'publication'}
+    last = r.retrieval_diagnostics['claims'][0]['queries'][-1]
+    assert last['kind'] == 'linked_entity' and last['query'].startswith("L'Obs")
+    assert r.retrieval_diagnostics['entity_planner_version'] == 2
+
+
+def test_invalid_leads_leave_query_slot_unused(index):
+    with patch('src.retrieve.retrieve_bm25', return_value=[passage(title='Mira Vale', text='Title: Mira Vale.')]) as backend:
+        r = retrieval.retrieve(record(), index, top_k=2, use_cache=False, query_strategy='contextual_v1')
+    assert backend.call_count == 2
+    assert len(r.retrieval_diagnostics['claims'][0]['queries']) == 2

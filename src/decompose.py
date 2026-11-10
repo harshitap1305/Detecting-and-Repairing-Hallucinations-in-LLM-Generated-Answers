@@ -30,6 +30,7 @@ from typing import List, Optional, Tuple
 from src.schema import AnswerRecord, Claim
 import src.llm as llm
 from src.experiments.runtime import strict
+from src.answer_attribution import build_attribution, question_clauses
 
 # ─── spaCy with regex fallback ────────────────────────────────────────────────
 
@@ -154,7 +155,14 @@ CORE PRINCIPLES:
 OUTPUT FORMAT:
 Return ONLY a valid JSON array of objects:
 [
-  {"claim": "<standalone atomic claim>", "sentence_id": <int>, "check_worthy": <true|false>},
+  {"claim": "<standalone atomic claim>", "sentence_id": <int>, "check_worthy": <true|false>,
+   "attribution": {"status": "bound|ambiguous|answer_only|nonfactual",
+     "answer_spans": [[<start>, <end>]], "bindings": [
+       {"clause_id": "q1", "answer_span": [<start>, <end>], "answer_text": "<exact answer slice>",
+        "relation": "<answer-bearing relationship, not a descriptive question premise>",
+        "borrowed_context": [{"source": "question|answer", "span": [<start>, <end>], "text": "<exact source slice>",
+                              "role": "referent|relation_context"}]}],
+     "rationale": "<why this answer span expresses this relationship>"}},
   ...
 ]"""
 
@@ -272,13 +280,37 @@ Do not invent names for unspecified people.
 """
 
 
+_ATTRIBUTION_EXAMPLE_QUESTION = "Where was Nera born? What year did she move?"
+_ATTRIBUTION_EXAMPLE = [{
+    "claim": "Nera was born in Cedar Bay.", "sentence_id": 0, "check_worthy": True,
+    "attribution": {"status": "bound", "answer_spans": [[0, 9]],
+        "bindings": [{"clause_id": "q1", "answer_span": [0, 9], "answer_text": "Cedar Bay",
+            "relation": "birthplace", "borrowed_context": [{"source": "question",
+                "span": [_ATTRIBUTION_EXAMPLE_QUESTION.index("Nera"), _ATTRIBUTION_EXAMPLE_QUESTION.index("Nera") + 4],
+                "text": "Nera", "role": "referent"}]}],
+        "rationale": "The location fragment answers only the birthplace clause, not the move-year clause."},
+}]
+
+
 def _build_prompt(question: str, answer: str, sentences: List[Tuple[str, int, int]]) -> str:
     numbered_sentences = "\n".join(
-        f"[{i}] {s_text}" for i, (s_text, _, _) in enumerate(sentences)
+        f"[{i}] chars[{start}:{end}] {s_text}" for i, (s_text, start, end) in enumerate(sentences)
     )
     return (
         f"{_SYSTEM_PROMPT}\n\n"
         f"{_FEW_SHOT_EXAMPLES}\n{_FRAGMENT_EXAMPLES}\n\n"
+        "The examples above illustrate claim content. In your output also provide attribution for EVERY claim. "
+        "Use original character offsets. A bound factual claim requires an answer-bearing relationship, "
+        "answer spans and question clause IDs. Borrow only referents/relation context, never a new factual answer. "
+        "The same span can support multiple claims only when the answer actually expresses each relationship. "
+        "Use ambiguous for uncertain clause/reference binding, with no guessed names or missing answers. "
+        "Use answer_only for explicit answer facts not answering a question clause; nonfactual for boilerplate/opinions. "
+        "Those last two statuses have empty bindings. Borrowed context can point to question text or earlier answer text. "
+        "Do not mark every clause answered by one fragment.\n"
+        f"Complete attribution example: Question={_ATTRIBUTION_EXAMPLE_QUESTION!r}, Answer='Cedar Bay', "
+        f"Output={json.dumps(_ATTRIBUTION_EXAMPLE)}. The q2 clause remains unanswered.\n"
+        f"Available question clauses (surface segmentation): {json.dumps(question_clauses(question), ensure_ascii=False)}\n"
+        f"Original answer length: {len(answer)} characters.\n"
         f"NOW DECOMPOSE THE FOLLOWING:\n"
         f"Question: {question}\n"
         f"Numbered sentences in Answer:\n{numbered_sentences}\n\n"
@@ -384,13 +416,16 @@ def decompose(
     sentence_spans = split_sentences_with_spans(record.answer)
     if not sentence_spans:
         record.claims = []
-        record.decomposition_diagnostics = {"semantics_version": 2, "status": "empty_answer", "attempts": 0}
+        record.decomposition_diagnostics = {"semantics_version": 3, "status": "empty_answer", "attempts": 0,
+            "attribution": build_attribution([], question=record.question, answer=record.answer,
+                                             sentence_spans=[], record_id=record.id)}
         return record
 
     prompt = _build_prompt(record.question, record.answer, sentence_spans)
     raw_claims: List[dict] = []
 
     issue = None
+    attribution = None
     for attempt in range(max_retries):
         temp = 0.0 if attempt == 0 else 0.2
         response = llm.call(
@@ -401,11 +436,18 @@ def decompose(
         issue = ("Malformed JSON; return a JSON array." if parsed is None else
                  _inventory_issue(parsed, record.question, record.answer, sentence_spans, min_claim_length))
         if issue is None:
+            try:
+                attribution = build_attribution(parsed, question=record.question, answer=record.answer,
+                                                sentence_spans=sentence_spans, record_id=record.id)
+            except (ValueError, TypeError, KeyError) as exc:
+                issue = f"Malformed answer attribution: {exc}"
+        if issue is None:
             raw_claims = parsed
             break
     record.decomposition_diagnostics = {
-        "semantics_version": 2, "status": "unresolved_coverage" if issue else "complete",
+        "semantics_version": 3, "status": "unresolved_coverage" if issue else "complete",
         "attempts": attempt + 1, "reason": issue,
+        "attribution": attribution if not issue else None,
     }
     if issue and strict.get():
         raise ValueError("Decomposition unresolved coverage: " + issue)
