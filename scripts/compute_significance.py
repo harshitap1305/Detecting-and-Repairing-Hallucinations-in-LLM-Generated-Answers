@@ -88,19 +88,24 @@ def main(argv=None):
     # 1. SCR (Supported Claim Ratio)
     sys_scrs = [compute_scr(sys_records[i], use_after=True) for i in common_ids]
     base_scrs = [compute_scr(base_records[i], use_after=True) for i in common_ids]
-    scr_wilcoxon = paired_wilcoxon_test(sys_scrs, base_scrs)
-    scr_diff_mean, scr_diff_low, scr_diff_high = bootstrap_confidence_interval(
-        [s - b for s, b in zip(sys_scrs, base_scrs)], n_bootstrap=args.n_bootstrap
-    )
-    metrics["scr"] = {
-        "system_mean": sum(sys_scrs) / len(sys_scrs),
-        "baseline_mean": sum(base_scrs) / len(base_scrs),
-        "mean_difference": scr_diff_mean,
-        "ci_95": [scr_diff_low, scr_diff_high],
-        "wilcoxon_stat": scr_wilcoxon["statistic"],
-        "p_value": scr_wilcoxon["p_value"],
-        "significant": scr_wilcoxon["is_significant_p05"],
-    }
+    if any(value is None for value in sys_scrs + base_scrs):
+        metrics["scr"] = {"status": "unavailable", "reason": "Undefined SCR in paired records",
+                          "undefined_record_ids": [rid for rid, s, b in zip(common_ids, sys_scrs, base_scrs)
+                                                   if s is None or b is None]}
+    else:
+        scr_wilcoxon = paired_wilcoxon_test(sys_scrs, base_scrs)
+        scr_diff_mean, scr_diff_low, scr_diff_high = bootstrap_confidence_interval(
+            [s - b for s, b in zip(sys_scrs, base_scrs)], n_bootstrap=args.n_bootstrap
+        )
+        metrics["scr"] = {
+            "system_mean": sum(sys_scrs) / len(sys_scrs),
+            "baseline_mean": sum(base_scrs) / len(base_scrs),
+            "mean_difference": scr_diff_mean,
+            "ci_95": [scr_diff_low, scr_diff_high],
+            "wilcoxon_stat": scr_wilcoxon["statistic"],
+            "p_value": scr_wilcoxon["p_value"],
+            "significant": scr_wilcoxon["is_significant_p05"],
+        }
 
     # 2. Preservation Rate
     sys_pres = [compute_preservation_rate(sys_records[i]) for i in common_ids]
@@ -137,7 +142,8 @@ def main(argv=None):
     }
 
     from src.experiments.statistics import holm_adjust
-    for metric, adjusted in zip(metrics.values(), holm_adjust([m["p_value"] for m in metrics.values()])):
+    defined = [m for m in metrics.values() if m.get("status") != "unavailable"]
+    for metric, adjusted in zip(defined, holm_adjust([m["p_value"] for m in defined])):
         metric["p_value_holm"] = adjusted
         metric["significant_holm_p05"] = adjusted < 0.05
     print("Legacy diagnostics only; not independent factual repair measurements.")
@@ -145,6 +151,9 @@ def main(argv=None):
     print(f"\n{'Metric':<18} | {'System':<8} | {'Baseline':<8} | {'Diff [95% CI]':<22} | {'Holm-adjusted p-value'}")
     print("-" * 80)
     for name, m in metrics.items():
+        if m.get("status") == "unavailable":
+            print(f"{name}: N/A — {m['reason']}")
+            continue
         ci_str = f"{m['mean_difference']:+.3f} [{m['ci_95'][0]:+.3f}, {m['ci_95'][1]:+.3f}]"
         print(f"{name:<18} | {m['system_mean']:<8.4f} | {m['baseline_mean']:<8.4f} | {ci_str:<22} | {format_p_value(m['p_value_holm'])}")
     print("=" * 80 + "\n")

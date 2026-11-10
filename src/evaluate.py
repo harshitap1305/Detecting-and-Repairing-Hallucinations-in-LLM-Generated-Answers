@@ -257,7 +257,7 @@ def evaluate_claim_detection(records, gold_records, n_bootstrap=1000, seed=42):
 
 # ─── 3. FActScore-style Supported Claim Ratio (SCR) ──────────────────────────
 
-def compute_scr(record: AnswerRecord, use_after: bool = False) -> float:
+def compute_scr(record: AnswerRecord, use_after: bool = False) -> Optional[float]:
     """
     Compute Supported Claim Ratio (SCR) for an AnswerRecord:
     SCR = (# Supported Claims) / (# Check-worthy Claims)
@@ -267,9 +267,15 @@ def compute_scr(record: AnswerRecord, use_after: bool = False) -> float:
     if not use_after and record.reliability_score_before is not None:
         return float(record.reliability_score_before)
 
+    # An explicit null in versioned diagnostics must not fall back to the
+    # original inventory when the final candidate has no factual targets.
+    details = record.verification_diagnostics
+    if details and details.get("semantics_version") == 2:
+        stage = details.get("after" if use_after else "before")
+        return stage["score"] if stage is not None else None
     cw = record.check_worthy_claims
     if not cw:
-        return 1.0
+        return None
 
     supported = sum(1 for c in cw if c.label == "Supported")
     return float(supported / len(cw))
@@ -446,11 +452,15 @@ def evaluate_dataset(
     # 1. SCR Progression
     scrs_before = [compute_scr(r, use_after=False) for r in records]
     scrs_after = [compute_scr(r, use_after=True) for r in records]
-    scr_deltas = [a - b for a, b in zip(scrs_after, scrs_before)]
+    scr_deltas = [a - b for a, b in zip(scrs_after, scrs_before) if a is not None and b is not None]
 
-    mean_b, ci_b_low, ci_b_high = bootstrap_confidence_interval(scrs_before, n_bootstrap, seed=seed)
-    mean_a, ci_a_low, ci_a_high = bootstrap_confidence_interval(scrs_after, n_bootstrap, seed=seed)
-    mean_d, ci_d_low, ci_d_high = bootstrap_confidence_interval(scr_deltas, n_bootstrap, seed=seed)
+    def scr_interval(values):
+        available = [value for value in values if value is not None]
+        return (bootstrap_confidence_interval(available, n_bootstrap, seed=seed)
+                if available else (None, None, None))
+    mean_b, ci_b_low, ci_b_high = scr_interval(scrs_before)
+    mean_a, ci_a_low, ci_a_high = scr_interval(scrs_after)
+    mean_d, ci_d_low, ci_d_high = scr_interval(scr_deltas)
 
     # 2. Preservation & Over-edit Rates
     preservations = [compute_preservation_rate(r) for r in records]
@@ -500,6 +510,10 @@ def evaluate_dataset(
         "check_worthy_claims": total_cw,
         "label_distribution": label_counts,
         "scr": {
+            "coverage": {"total_records": len(records),
+                         "before_defined": sum(x is not None for x in scrs_before),
+                         "after_defined": sum(x is not None for x in scrs_after),
+                         "paired_defined": len(scr_deltas)},
             "before": {"mean": mean_b, "ci_lower": ci_b_low, "ci_upper": ci_b_high},
             "after": {"mean": mean_a, "ci_lower": ci_a_low, "ci_upper": ci_a_high},
             "delta": {"mean": mean_d, "ci_lower": ci_d_low, "ci_upper": ci_d_high},

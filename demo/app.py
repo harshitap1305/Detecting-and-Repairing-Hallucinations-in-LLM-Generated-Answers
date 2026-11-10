@@ -148,31 +148,33 @@ def format_metrics_banner(record: AnswerRecord) -> str:
     """
     Generate an HTML stats card displaying reliability score progression and claims.
     """
-    sb = record.reliability_score_before if record.reliability_score_before is not None else 0.5
-    sa = record.reliability_score_after if record.reliability_score_after is not None else sb
-    delta = sa - sb
+    sb = record.reliability_score_before
+    sa = record.reliability_score_after
+    delta = sa - sb if sa is not None and sb is not None else None
+    before_text = "N/A" if sb is None else f"{sb * 100:.1f}%"
+    after_text = "N/A" if sa is None else f"{sa * 100:.1f}%"
+    delta_text = "N/A" if delta is None else f"{delta * 100:+.1f}%"
 
     n_cw = len(record.check_worthy_claims)
     n_sup = sum(1 for c in record.check_worthy_claims if c.label == "Supported")
     n_con = sum(1 for c in record.check_worthy_claims if c.label == "Contradicted")
     n_unv = sum(1 for c in record.check_worthy_claims if c.label == "Unverifiable")
 
-    delta_color = "#2e7d32" if delta >= 0 else "#c62828"
-    delta_sign = "+" if delta >= 0 else ""
+    delta_color = "#6c757d" if delta is None else "#2e7d32" if delta >= 0 else "#c62828"
 
     return f"""
     <div style='display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; font-family: sans-serif;'>
         <div style='background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 12px 18px; flex: 1; min-width: 140px; text-align: center;'>
             <div style='font-size: 12px; color: #6c757d; text-transform: uppercase;'>Reliability Before</div>
-            <div style='font-size: 24px; font-weight: bold; color: #495057;'>{sb * 100:.1f}%</div>
+            <div style='font-size: 24px; font-weight: bold; color: #495057;'>{before_text}</div>
         </div>
         <div style='background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 12px 18px; flex: 1; min-width: 140px; text-align: center;'>
             <div style='font-size: 12px; color: #6c757d; text-transform: uppercase;'>Reliability After</div>
-            <div style='font-size: 24px; font-weight: bold; color: {delta_color};'>{sa * 100:.1f}%</div>
+            <div style='font-size: 24px; font-weight: bold; color: {delta_color};'>{after_text}</div>
         </div>
         <div style='background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 12px 18px; flex: 1; min-width: 140px; text-align: center;'>
             <div style='font-size: 12px; color: #6c757d; text-transform: uppercase;'>Reliability Gain</div>
-            <div style='font-size: 24px; font-weight: bold; color: {delta_color};'>{delta_sign}{delta * 100:.1f}%</div>
+            <div style='font-size: 24px; font-weight: bold; color: {delta_color};'>{delta_text}</div>
         </div>
         <div style='background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 12px 18px; flex: 1; min-width: 200px; text-align: center;'>
             <div style='font-size: 12px; color: #6c757d; text-transform: uppercase;'>Claim Breakdown</div>

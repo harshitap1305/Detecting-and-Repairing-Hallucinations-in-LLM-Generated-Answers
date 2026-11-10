@@ -30,9 +30,12 @@ def execute(system: dict, record: AnswerRecord, task: str, options: dict) -> dic
         record = run_pipeline(record, **pipeline_options)
         native["self_verification_scr"] = {
             "before": record.reliability_score_before, "after": record.reliability_score_after}
+        if record.verification_diagnostics is not None:
+            native["self_verification_scr"]["details"] = record.verification_diagnostics
         if name == "b6":
             record = run_b6(record)
-            native = {"detector_self_verification_scr": record.reliability_score_before}
+            native = {"detector_self_verification_scr": record.reliability_score_before,
+                      "verification_details": record.verification_diagnostics}
     elif name == "b0":
         record = run_b0(record)
     elif name == "b1":

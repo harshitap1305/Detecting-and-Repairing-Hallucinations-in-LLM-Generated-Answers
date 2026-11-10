@@ -239,6 +239,11 @@ def validate_output(result: AnswerRecord, source: AnswerRecord,
         raise ValueError(f"Missing run ID for {source.id}")
     for name in ("reliability_score_before", "reliability_score_after"):
         score = getattr(result, name)
+        if score is None:
+            stage = "before" if name.endswith("before") else "after"
+            diagnostic = (result.verification_diagnostics or {}).get(stage, {})
+            if diagnostic.get("reason") in ("empty_answer", "no_check_worthy_claims") and diagnostic.get("check_worthy") == 0:
+                continue
         if not isinstance(score, (float, int)) or not math.isfinite(score) or not 0 <= score <= 1:
             raise ValueError(f"Invalid {name} for {source.id}")
     predicted_inventory = [(c.id, c.text, c.sentence_id, c.span, c.check_worthy)

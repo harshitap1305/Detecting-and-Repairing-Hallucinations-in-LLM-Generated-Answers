@@ -325,13 +325,9 @@ def verify(
         tau_s = tau_s if tau_s is not None else loaded_s
         tau_c = tau_c if tau_c is not None else loaded_c
 
-    supported_count = 0
-    check_worthy_count = 0
-
     for claim in record.claims:
         if not claim.check_worthy:
             continue
-        check_worthy_count += 1
 
         if verifier == "llm":
             verify_claim_llm(claim, model=model, provider=provider)
@@ -349,12 +345,25 @@ def verify(
         else:
             raise ValueError(f"Unknown verifier type: {verifier!r}")
 
-        if claim.label == "Supported":
-            supported_count += 1
-
-    if check_worthy_count > 0:
-        record.reliability_score_before = supported_count / check_worthy_count
-    else:
-        record.reliability_score_before = 1.0
+    summary = verification_summary(record)
+    record.reliability_score_before = summary["score"]
+    record.reliability_score_after = None  # A new initial pass invalidates any previous final score.
+    record.verification_diagnostics = {"semantics_version": 2, "before": summary}
 
     return record
+
+
+def verification_summary(record: AnswerRecord) -> dict:
+    """Describe the current inventory; no factual targets means no defined SCR."""
+    claims = record.check_worthy_claims if record.answer.strip() else []
+    reason = ("empty_answer" if not record.answer.strip() else
+              "no_check_worthy_claims" if not claims else None)
+    return {
+        "score": sum(c.label == "Supported" for c in claims) / len(claims) if claims else None,
+        "reason": reason,
+        "check_worthy": len(claims),
+        "supported": sum(c.label == "Supported" for c in claims),
+        "contradicted": sum(c.label == "Contradicted" for c in claims),
+        "unverifiable": sum(c.label == "Unverifiable" for c in claims),
+        "unlabeled": sum(c.label not in ("Supported", "Contradicted", "Unverifiable") for c in claims),
+    }

@@ -1,6 +1,7 @@
 # Implementation plan: fixes identified by the reviewed development pilot
 
-Status: proposed implementation sequence; no algorithm changes made by this plan.
+Status: phases 1–2 implemented with offline regression coverage; phases 3–6
+remain planned. A new live development run has not yet been performed.
 
 ## Evidence and scope
 

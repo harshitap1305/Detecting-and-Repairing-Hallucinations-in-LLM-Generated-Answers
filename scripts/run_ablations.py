@@ -141,7 +141,9 @@ def run_ablation_experiment(
     print(f"\n{'Variant':<32} | {'SCR Before':<10} | {'SCR After':<10} | {'SCR Delta':<10} | {'Preservation':<12} | {'ROUGE-L'}")
     print("-" * 95)
     for r in results_summary:
-        print(f"{r['variant']:<32} | {r['scr_before']:<10.3f} | {r['scr_after']:<10.3f} | {r['scr_delta']:<+10.3f} | {r['preservation_rate']:<12.3f} | {r['rouge_l_f1']:.3f}")
+        def score(value):
+            return "N/A" if value is None else f"{value:.3f}"
+        print(f"{r['variant']:<32} | {score(r['scr_before']):<10} | {score(r['scr_after']):<10} | {score(r['scr_delta']):<10} | {r['preservation_rate']:<12.3f} | {r['rouge_l_f1']:.3f}")
     print("=" * 95 + "\n")
 
     out_file = output_dir / f"ablation_{ablation_name}.json"

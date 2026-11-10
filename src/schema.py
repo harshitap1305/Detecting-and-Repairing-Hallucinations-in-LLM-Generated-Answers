@@ -82,11 +82,18 @@ class AnswerRecord:
     reliability_score_after: Optional[float] = None   # same, after repair
     repair_iterations: int = 0
     run_id: Optional[str] = None
+    verification_diagnostics: Optional[dict] = None
+    decomposition_diagnostics: Optional[dict] = None
 
     # ── serialization ──────────────────────────────────────────────────────────
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        result = asdict(self)
+        # Absent diagnostics must not change historical gold/output fingerprints.
+        for name in ("verification_diagnostics", "decomposition_diagnostics"):
+            if result[name] is None:
+                result.pop(name)
+        return result
 
     @classmethod
     def from_dict(cls, d: dict) -> "AnswerRecord":

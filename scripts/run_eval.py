@@ -105,9 +105,15 @@ def main(argv=None):
 
     scr = metrics["scr"]
     print("\nSelf-verification SCR diagnostic [95% CI]:")
-    print(f"  SCR BEFORE: {scr['before']['mean']:.4f} [{scr['before']['ci_lower']:.4f}, {scr['before']['ci_upper']:.4f}]")
-    print(f"  SCR AFTER:  {scr['after']['mean']:.4f} [{scr['after']['ci_lower']:.4f}, {scr['after']['ci_upper']:.4f}]")
-    print(f"  SCR DELTA:  {scr['delta']['mean']:+.4f} [{scr['delta']['ci_lower']:+.4f}, {scr['delta']['ci_upper']:+.4f}]")
+    for stage in ("before", "after", "delta"):
+        values = scr[stage]
+        if values["mean"] is None:
+            print(f"  SCR {stage.upper()}: N/A")
+        else:
+            print(f"  SCR {stage.upper()}: {values['mean']:.4f} "
+                  f"[{values['ci_lower']:.4f}, {values['ci_upper']:.4f}]")
+    print("  SCR coverage:", scr["coverage"])
+
 
     pres = metrics["preservation_rate"]
     oe = metrics["over_edit_rate"]

@@ -155,3 +155,34 @@ Use `scripts/run_eval.py --run-dir ... --gold ... --output ...` for complete sav
 runs and `scripts/review_repairs.py` for blinded human packets, rating imports,
 and adjudication. This does not change execution completion into a factual
 performance claim; independent ratings and the final report remain separate.
+
+## Self-verification and decomposition diagnostics (semantics version 2)
+
+New pipeline records include `verification_diagnostics` with separate `before`
+and `after` scores, check-worthy/supported/contradicted/unverifiable/unlabeled
+counts, undefined-score reasons, and an explicit `stop_reason`. No check-worthy
+claims means `null`, never perfect support. `empty_answer` distinguishes deletion
+from a nonempty candidate with `no_check_worthy_claims`. Unchanged answers and
+exhausted budgets are stop conditions, not evidence of a correction. A stop
+reason `all_current_claims_supported` describes only the current predicted
+inventory; it does not establish original-claim preservation or completeness.
+The runner's native SCR diagnostic includes these details. UI/logging displays
+undefined values as N/A. Legacy aggregate diagnostics expose defined/paired
+coverage and do not substitute original-claim scores for undefined final scores.
+The legacy significance CLI makes SCR unavailable when any paired record lacks a
+score rather than silently dropping pairs.
+
+Decomposition uses question context to expand short fragments while retaining
+answer spans and uncertainty/attribution in claim text. Questions do not supply
+missing factual answers. A bounded retry handles malformed inventories, copied
+short fragments and detectable loss of factual modality. `decomposition_diagnostics`
+records attempts and coverage status. These surface heuristics are not semantic
+validation: ambiguous/unrecognized cases still require empirical evaluation.
+Exhaustion produces explicit unresolved coverage in interactive mode and fails
+strict benchmark execution. Opinions and boilerplate remain non-check-worthy.
+
+Historical records without these optional fields serialize as before, including
+their original hashes and stored numeric SCR values. Existing bundles are not
+rewritten or relabeled. New code/prompt settings require a new run directory and
+new repair assessments. Original-to-candidate semantic tracking and retrieval or
+repair-policy changes remain later phases of the follow-up plan.

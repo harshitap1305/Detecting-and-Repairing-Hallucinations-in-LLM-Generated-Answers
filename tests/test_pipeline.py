@@ -224,7 +224,8 @@ class TestPipeline(unittest.TestCase):
             )
 
         self.assertEqual(result.repaired_answer, "")
-        self.assertEqual(result.reliability_score_after, 1.0)
+        self.assertIsNone(result.reliability_score_after)
+        self.assertEqual(result.verification_diagnostics["after"]["reason"], "empty_answer")
         self.assertEqual(result.repair_iterations, 1)
 
 

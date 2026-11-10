@@ -7,7 +7,7 @@ Phase 4 Implementation:
       1. Multi-fact sentences
       2. Cross-sentence pronoun / coreference resolution
       3. List decomposition
-      4. Hedged statements (check_worthy=False)
+      4. Hedged factual statements (check_worthy=True; preserve uncertainty)
       5. Subjective opinions & hyperbole (check_worthy=False)
       6. AI/LLM boilerplate & meta-text (check_worthy=False)
       7. Questions & imperative instructions (check_worthy=False)
@@ -138,8 +138,18 @@ CORE PRINCIPLES:
 3. PRESERVATION: Never change names, dates, numbers, measurements, or technical terms.
 4. CHECK-WORTHINESS:
    - Mark verifiable real-world facts with check_worthy=true.
-   - Mark opinions, subjective judgments, questions, imperative suggestions, hedges, and AI meta-boilerplate with check_worthy=false.
+   - Mark opinions, subjective judgments, questions, imperative suggestions, and AI meta-boilerplate with check_worthy=false.
+   - A hedge does NOT remove factual content. Keep factual assertions check_worthy=true
+     and preserve uncertainty, frequency qualifications and attribution in the claim text.
+     Never turn "may have" into "did" or invent a source for "Reportedly".
 5. SENTENCE MAPPING: Assign each claim its 0-indexed sentence_id in the original answer.
+6. SHORT ANSWERS: Use the question ONLY to resolve the relationship and referents
+   expressed by the answer. Expand entity-only, date-only, frequency-only and
+   definition fragments into full propositions. Do not reduce an answer to a
+   generic category claim (for example, merely saying that an event is an event).
+7. QUESTION BOUNDARIES: A question is not evidence that its premises are true.
+   Do not invent missing answers to other clauses of a compound question. If a
+   reference is ambiguous, preserve that ambiguity instead of guessing a fact.
 
 OUTPUT FORMAT:
 Return ONLY a valid JSON array of objects:
@@ -191,7 +201,7 @@ Question: Who wrote the play Cardenio?
 Answer: Some literary scholars believe that William Shakespeare may have co-authored the lost play Cardenio with John Fletcher.
 Output:
 [
-  {"claim": "William Shakespeare may have co-authored the lost play Cardenio with John Fletcher.", "sentence_id": 0, "check_worthy": false}
+  {"claim": "Some literary scholars believe that William Shakespeare may have co-authored the lost play Cardenio with John Fletcher.", "sentence_id": 0, "check_worthy": true}
 ]
 
 EXAMPLE 6: AI boilerplate and meta-discourse
@@ -226,13 +236,49 @@ Output:
 ]"""
 
 
+# Generic fragment examples; no pilot gold answers are used at inference time.
+_FRAGMENT_EXAMPLES = """
+EXAMPLE 9: Entity-only answer (synthetic)
+Question: Where was researcher Mira Vale born?
+Answer: Alder Bay
+Output:
+[{"claim": "Mira Vale was born in Alder Bay.", "sentence_id": 0, "check_worthy": true}]
+
+EXAMPLE 10: Frequency-only answer (synthetic)
+Question: How often is the Northbridge Review published?
+Answer: Monthly
+Output:
+[{"claim": "The Northbridge Review is published monthly.", "sentence_id": 0, "check_worthy": true}]
+
+EXAMPLE 11: Definition fragment and unanswered question (synthetic)
+Question: What is the Cedar Institute known for? What activity measures distances?
+Answer: Surveying
+Output:
+[{"claim": "Surveying involves measuring distances.", "sentence_id": 0, "check_worthy": true}]
+Do not assert that the Cedar Institute teaches surveying: the answer did not say so.
+
+EXAMPLE 12: Qualified fragment (synthetic)
+Question: How often does the Brook ferry operate?
+Answer: Usually daily
+Output:
+[{"claim": "The Brook ferry usually operates daily.", "sentence_id": 0, "check_worthy": true}]
+
+EXAMPLE 13: Ambiguous referent (synthetic)
+Question: When did they arrive?
+Answer: 1998
+Output:
+[{"claim": "The people referred to in the question arrived in 1998.", "sentence_id": 0, "check_worthy": true}]
+Do not invent names for unspecified people.
+"""
+
+
 def _build_prompt(question: str, answer: str, sentences: List[Tuple[str, int, int]]) -> str:
     numbered_sentences = "\n".join(
         f"[{i}] {s_text}" for i, (s_text, _, _) in enumerate(sentences)
     )
     return (
         f"{_SYSTEM_PROMPT}\n\n"
-        f"{_FEW_SHOT_EXAMPLES}\n\n"
+        f"{_FEW_SHOT_EXAMPLES}\n{_FRAGMENT_EXAMPLES}\n\n"
         f"NOW DECOMPOSE THE FOLLOWING:\n"
         f"Question: {question}\n"
         f"Numbered sentences in Answer:\n{numbered_sentences}\n\n"
@@ -266,6 +312,53 @@ def _clean_claim_text(text: str) -> str:
     return text
 
 
+_MODALITY = re.compile(
+    r"\b(reportedly|allegedly|possibly|probably|might|usually|sometimes|"
+    r"according to|may (?!\d)|believe[ds]?)\b", re.I,
+)
+_PREDICATE = re.compile(
+    r"\b(is|are|was|were|has|have|had|involves?|includes?|operates?|published|born|"
+    r"died|arrived|measures?|occurs?|wrote|won|built|created|founded|released|"
+    r"located|lives?|works?|teaches?|runs?|opens?)\b", re.I,
+)
+
+
+def _contextual_fragment(question: str, answer: str) -> bool:
+    """Conservative retry signal, not a factuality or grammatical classifier."""
+    if not re.match(r"^(who|when|where|which|what|how|at what|in what)\b", question.strip(), re.I):
+        return False
+    if re.search(r"\b(opinion|beautiful|favorite|favourite|amazing|wonderful)\b", question + " " + answer, re.I):
+        return False
+    if re.match(r"^(I (think|believe|hope|don.t know)|as an AI|please|perhaps not|unknown|not sure|no idea)\b", answer.strip(), re.I):
+        return False
+    return len(answer.split()) <= 6 and not _PREDICATE.search(answer)
+
+
+def _inventory_issue(parsed, question, answer, sentence_spans, min_length):
+    if not parsed:
+        return "No claim inventory. Extract answer content without inventing missing facts."
+    for item in parsed:
+        if (not isinstance(item, dict) or not isinstance(item.get("claim"), str)
+                or len(_clean_claim_text(item["claim"])) < min_length
+                or type(item.get("sentence_id")) is not int
+                or not 0 <= item["sentence_id"] < len(sentence_spans)
+                or type(item.get("check_worthy")) is not bool):
+            return "Malformed decomposition claim fields or unusably short claim."
+        source = sentence_spans[item["sentence_id"]][0]
+        # A surface safeguard: ask the model to fix loss of modality, never
+        # manufacture a stronger proposition or force every sentence factual.
+        if _MODALITY.search(source) and (_PREDICATE.search(source) or _contextual_fragment(question, source)):
+            if not item["check_worthy"] or not _MODALITY.search(item["claim"]):
+                return "Preserve factual uncertainty/attribution in claim text and keep factual payload check-worthy."
+    if _contextual_fragment(question, answer):
+        worthy = [item for item in parsed if item["check_worthy"]]
+        if not worthy or any(
+                _clean_claim_text(item["claim"]).casefold() == _clean_claim_text(answer).casefold()
+                for item in worthy):
+            return "Expand the short answer into a checkable relationship using question context; do not invent other answers."
+    return None
+
+
 # ─── Public API ───────────────────────────────────────────────────────────────
 
 def decompose(
@@ -283,42 +376,39 @@ def decompose(
         record:           The AnswerRecord to process.
         model:            LLM model name.
         provider:         LLM provider ("groq" | "openai" | "local").
-        max_retries:      Retries on malformed JSON response.
-        min_claim_length: Discard claims shorter than this threshold.
+        max_retries:      Maximum attempts, including retries for unusable inventories.
+        min_claim_length: Retry claims shorter than this threshold.
     """
+    if max_retries < 1:
+        raise ValueError("max_retries must allow at least one decomposition attempt")
     sentence_spans = split_sentences_with_spans(record.answer)
     if not sentence_spans:
         record.claims = []
+        record.decomposition_diagnostics = {"semantics_version": 2, "status": "empty_answer", "attempts": 0}
         return record
 
     prompt = _build_prompt(record.question, record.answer, sentence_spans)
     raw_claims: List[dict] = []
 
+    issue = None
     for attempt in range(max_retries):
         temp = 0.0 if attempt == 0 else 0.2
         response = llm.call(
-            prompt=prompt,
-            model=model,
-            provider=provider,
-            temperature=temp,
-            use_cache=(attempt == 0),
+            prompt=prompt if issue is None else prompt + "\nRETRY FEEDBACK: " + issue,
+            model=model, provider=provider, temperature=temp, use_cache=(attempt == 0),
         )
         parsed = _parse_claims_json(response)
-        if parsed is not None:
+        issue = ("Malformed JSON; return a JSON array." if parsed is None else
+                 _inventory_issue(parsed, record.question, record.answer, sentence_spans, min_claim_length))
+        if issue is None:
             raw_claims = parsed
             break
-        if attempt == max_retries - 1:
-            print(f"[decompose] ⚠ JSON parse failed for record {record.id} after {max_retries} attempts.")
-
-    if strict.get() and not raw_claims:
-        raise ValueError("Decomposition returned no valid claim inventory")
-    if strict.get():
-        for item in raw_claims:
-            if (not isinstance(item, dict) or not isinstance(item.get("claim"), str)
-                    or not item["claim"].strip() or type(item.get("sentence_id")) is not int
-                    or not 0 <= item["sentence_id"] < len(sentence_spans)
-                    or type(item.get("check_worthy")) is not bool):
-                raise ValueError("Malformed decomposition claim fields")
+    record.decomposition_diagnostics = {
+        "semantics_version": 2, "status": "unresolved_coverage" if issue else "complete",
+        "attempts": attempt + 1, "reason": issue,
+    }
+    if issue and strict.get():
+        raise ValueError("Decomposition unresolved coverage: " + issue)
     claims: List[Claim] = []
     for i, rc in enumerate(raw_claims):
         if not isinstance(rc, dict):
@@ -350,4 +440,6 @@ def decompose(
         claims.append(claim)
 
     record.claims = claims
+    if not issue and not record.check_worthy_claims:
+        record.decomposition_diagnostics["status"] = "no_check_worthy_claims"
     return record

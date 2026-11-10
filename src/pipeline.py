@@ -24,7 +24,7 @@ from typing import List, Optional
 from src.schema import AnswerRecord
 from src.decompose import decompose
 from src.retrieve import retrieve
-from src.verify import verify
+from src.verify import verify, verification_summary
 from src.repair import repair
 
 
@@ -55,6 +55,8 @@ def run_pipeline(
 
     Returns the mutated AnswerRecord with repaired_answer and reliability deltas populated.
     """
+    if type(max_repair_iterations) is not int or max_repair_iterations < 0:
+        raise ValueError("max_repair_iterations must be a nonnegative integer")
     if verifier == "trained" and not trained_verifier_checkpoint:
         raise ValueError("trained_verifier_checkpoint is required for verifier='trained'")
     if repair_backend == "trained" and not trained_repair_checkpoint:
@@ -94,18 +96,30 @@ def run_pipeline(
         record, model=llm_model, provider=provider, verifier=verifier,
         trained_model_path=trained_verifier_checkpoint,
     )
-    _log(f"  Reliability BEFORE = {record.reliability_score_before:.2f}")
+    before = verification_summary(record)
+    record.reliability_score_before = before["score"]
+    def score_text(value):
+        return "N/A" if value is None else f"{value:.2f}"
+    _log(f"  Reliability BEFORE = {score_text(record.reliability_score_before)}")
 
     # ── Iterative Repair & Re-verification Loop (Stages 4 & 5) ─────────────────
     current_answer = record.answer
     working_record = record
     total_iterations_run = 0
+    stop_reason = "verification_only" if max_repair_iterations == 0 else "budget_exhausted"
 
     for iteration in range(1, max_repair_iterations + 1):
         hallucinated = working_record.hallucinated_claims
 
+        if not working_record.check_worthy_claims:
+            stop_reason = "empty_answer" if not current_answer.strip() else "no_check_worthy_claims"
+            _log(f"Iteration {iteration}: {stop_reason}; factual verification is unavailable.")
+            break
         if not hallucinated:
-            _log(f"Iteration {iteration}: All claims Supported! Early stopping convergence.")
+            stop_reason = ("all_current_claims_supported" if all(
+                c.label == "Supported" for c in working_record.check_worthy_claims
+            ) else "unresolved_verification")
+            _log(f"Iteration {iteration}: {stop_reason}.")
             break
 
         total_iterations_run = iteration
@@ -117,12 +131,14 @@ def run_pipeline(
 
         # Check if the repair made any changes
         if working_record.repaired_answer is None or working_record.repaired_answer == current_answer:
-            _log(f"Iteration {iteration}: Repaired answer identical to previous. Convergence reached.")
+            stop_reason = "unchanged_answer"
+            _log(f"Iteration {iteration}: No change; stopping without a correction claim.")
             break
 
         current_answer = working_record.repaired_answer
 
-        if not current_answer:
+        if not current_answer.strip():
+            stop_reason = "empty_answer"
             _log(f"Iteration {iteration}: All flagged text removed.")
             break
 
@@ -157,9 +173,11 @@ def run_pipeline(
     record.repaired_answer = current_answer
 
     # ── Final Re-Verification Pass ─────────────────────────────────────────────
-    if record.repaired_answer == "":
-        # An intentionally empty answer has no factual claims to re-verify.
-        record.reliability_score_after = 1.0
+    if not record.repaired_answer.strip():
+        after = verification_summary(AnswerRecord(
+            id=record.id, source_dataset=record.source_dataset,
+            question=record.question, answer=record.repaired_answer,
+        ))
     elif record.repaired_answer is not None and record.repaired_answer != record.answer:
         _log("Final Re-verification on converged answer...")
         final_check = AnswerRecord(
@@ -182,13 +200,22 @@ def run_pipeline(
             final_check, model=llm_model, provider=provider, verifier=verifier,
             trained_model_path=trained_verifier_checkpoint,
         )
-        record.reliability_score_after = final_check.reliability_score_before
+        after = verification_summary(final_check)
     else:
         record.repaired_answer = record.answer
-        record.reliability_score_after = record.reliability_score_before
+        after = dict(before)
 
+    record.reliability_score_after = after["score"]
+    if after["reason"]:
+        stop_reason = after["reason"]
+    elif stop_reason == "budget_exhausted" and after["supported"] == after["check_worthy"]:
+        stop_reason = "all_current_claims_supported"
+    record.verification_diagnostics = {
+        "semantics_version": 2, "before": before, "after": after, "stop_reason": stop_reason,
+    }
     record.repair_iterations = total_iterations_run
-    _log(f"Pipeline complete. Iterations: {total_iterations_run} | Reliability: {record.reliability_score_before:.2f} -> {record.reliability_score_after:.2f}")
+    _log(f"Pipeline complete. Iterations: {total_iterations_run} | Stop: {stop_reason} | "
+         f"Reliability: {score_text(record.reliability_score_before)} -> {score_text(record.reliability_score_after)}")
     return record
 
 
