@@ -19,6 +19,9 @@ def summarize(run):
                 'candidate': record['repaired_answer'],
                 'verification': record.get('verification_diagnostics'),
                 'coverage': final.get('coverage'),
+                'extraction': record.get('decomposition_diagnostics'),
+                'extraction_coverage': final.get('extraction_coverage'),
+                'target_verification_success': final.get('target_verification_success'),
                 'candidate_only_unverified': final.get('candidate_only_unverified'),
                 'repair': record.get('repair_diagnostics'),
                 'retrieval_stages': [{ 'stage': s['stage'], 'retrieval': s.get('retrieval')}

@@ -282,4 +282,30 @@ Decomposition also records the [answer attribution contract](answer_attribution.
 It names question relationships, original answer spans, borrowed referent/context
 spans and ambiguous or unanswered clauses. Structural validation does not establish
 semantic correctness. Missing old annotations remain explicit unknown coverage;
-the semantic checker and success-state gate remain later implementation phases.
+the separate bounded semantic checker and success-state gate are now implemented.
+
+
+## Semantic extraction settings
+
+Pipeline/B6 runtime options include the following, frozen into run identity:
+
+| CLI option | Default | Bounds |
+| --- | --- | --- |
+| `--extraction-check` | `semantic_v1` | `semantic_v1` or compatibility `structural` |
+| `--extraction-max-attempts` | `2` | 1–4 generation attempts per decomposition |
+| `--extraction-max-checks` | `2` | 1–4 logical semantic-check calls per decomposition |
+| `--extraction-max-claims` | `64` | 1–128 combined proposed claims and question clauses |
+
+Each accepted generation has at most one separate audit call; missing/ambiguous
+attribution and inventory-cap overflow require none. Cache hits still consume a
+logical check slot. Generation stops when attempts or check calls are exhausted;
+provider failures are surfaced normally. Checks request 2048 completion tokens,
+subject to the recorded effective model floor (4096 by default for GPT-OSS).
+A zero-call structural precondition failure is not a successful semantic check.
+
+Native SCR details now include before/after extraction coverage. The saved claim
+tracking snapshots and `inspect_pilot_run.py` preserve extraction findings and
+separate target-only verification success. These diagnostics cannot substitute
+for a new independent human assessment. Both historical final and v3 progress
+bundles continue to audit under their recorded semantics. Use a fresh run directory
+after the phase 5 live-pilot handoff; do not resume an old run with these changes.

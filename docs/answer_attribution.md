@@ -3,7 +3,7 @@
 This contract records a model's proposed mapping from answer content to question
 relationships. It is stored at `record.decomposition_diagnostics.attribution`;
 no new field is required on canonical claims or historical gold records.
-Decomposition diagnostics now use semantics version 3; the nested attribution
+Decomposition diagnostics now use semantics version 4; the nested attribution
 contract has its own `semantics_version: 1`.
 
 ## Question clauses and source coordinates
@@ -66,11 +66,59 @@ to a validated relationship. Empty answers have explicit `empty_answer` status.
 spans, a plausible relation string, or the generator's own `bound` label do not
 establish that the answer actually expresses that fact. A compound-question
 fragment can have valid coordinates while still being bound to the wrong clause.
-The separate semantic extraction checker and pipeline gate are phases 3 and 4
-of `docs/v3_followup_implementation_plan.md`; they are not implemented by this
-contract. No new evidence queries or semantic-checker model calls are added here.
+The separate semantic extraction checker and pipeline gate from phases 3 and 4
+of `docs/v3_followup_implementation_plan.md` are now implemented. They do not
+change the structural contract's meaning; their results are separate diagnostics.
+Direct `decompose()` calls retain `extraction_check="structural"` for compatibility.
+Pipeline/runner defaults explicitly select `semantic_v1` and require full proposed
+attribution for the semantic check. Missing or partial metadata cannot pass it.
 
 Historical records without this metadata retain their previous serialization
 and content hashes. Existing adjudicated and progress bundles remain historical
 artifacts. A new run requires a fresh output directory and, after the remaining
 fixes, new human assessments for changed outputs.
+
+
+## Semantic extraction audit and pipeline gating
+
+The audit sees the original question/answer, canonical proposed claim text and
+attribution only. It receives no retrieved evidence, verdict labels, reference
+repairs, reviewer ratings or gold. Its prompt independently tests answer-bearing
+relationships, argument roles, missing factual content, unsupported extra
+assertions, negation and uncertainty. It permits legitimate unanswered question
+clauses and semantic paraphrases. This remains a fallible model diagnostic,
+not independent human review or proof that an answer is factually true.
+
+`semantic_check` records per-claim `expressed`, `nonfactual`, `wrong_relation`,
+`unsupported_assertion` or `ambiguous` findings, plus per-clause `represented`,
+`unanswered`, `missing_relation` or `ambiguous` findings. Missing-content findings
+reference original answer spans. Every claim/clause must be covered exactly once;
+references, enum values, rationales, missing-content spans and cross-check
+consistency are validated. Empty blanket approvals and contradictory findings
+fail closed. Each accepted result includes a fingerprint binding it to the exact
+question, answer, canonical inventory and proposed attribution.
+
+Decomposition retries use actionable findings with explicit attempt/check/inventory
+caps. Attempt history and consumed budgets remain in diagnostics. Semantic retry
+exhaustion is unresolved coverage; strict execution fails and retains the normal
+benchmark error/trace history. Structured `event: extraction` trace entries are
+emitted before strict failure, preserving attempt findings and budgets even when
+no candidate output is committed. There is no retry-until-success loop. A check of a
+changed inventory requires a new fingerprint; a cached/stale result cannot approve
+an altered claim. Structural mode never supplies a semantic pass implicitly.
+
+Each pipeline snapshot preserves extraction proposals and check findings. Original
+and candidate extraction coverage are reported separately from their factual
+verification counts. `target_verification_success` describes the original
+predicted-target tracking condition alone. `factual_success` and the
+`all_targets_verified` stop state additionally require passed, input-bound semantic
+extraction checks on both original and final candidate. A wholly Supported but
+incorrectly extracted inventory can still have numeric SCR 1.0 while its pipeline
+state is `unresolved_extraction_coverage`.
+
+In semantic mode, unresolved generated extraction abstains from repair. Supplied
+fixed inventories skip original extraction and remain explicitly unassessed for
+this diagnostic; they can still be verified/repaired for fixed-inventory tasks.
+Generated replacements are checked normally. This does not certify end-to-end
+extraction for an externally supplied original inventory. Empty answers, evidence
+gaps, no-op edits, target alignment failures and extraction failures remain distinct.

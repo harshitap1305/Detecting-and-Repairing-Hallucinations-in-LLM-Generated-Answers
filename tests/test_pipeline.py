@@ -101,34 +101,34 @@ class TestPipeline(unittest.TestCase):
 
     def test_returns_answer_record(self):
         with patch("src.llm.call", side_effect=_mock_llm):
-            result = run_pipeline(self.sample_record, index_path=self.index_path)
+            result = run_pipeline(self.sample_record, index_path=self.index_path, extraction_check="structural")
         self.assertIsInstance(result, AnswerRecord)
 
     def test_claims_populated(self):
         with patch("src.llm.call", side_effect=_mock_llm):
-            result = run_pipeline(self.sample_record, index_path=self.index_path)
+            result = run_pipeline(self.sample_record, index_path=self.index_path, extraction_check="structural")
         self.assertGreater(len(result.claims), 0)
 
     def test_repaired_answer_not_none(self):
         with patch("src.llm.call", side_effect=_mock_llm):
-            result = run_pipeline(self.sample_record, index_path=self.index_path)
+            result = run_pipeline(self.sample_record, index_path=self.index_path, extraction_check="structural")
         self.assertIsNotNone(result.repaired_answer)
 
     def test_run_id_set(self):
         with patch("src.llm.call", side_effect=_mock_llm):
-            result = run_pipeline(self.sample_record, index_path=self.index_path)
+            result = run_pipeline(self.sample_record, index_path=self.index_path, extraction_check="structural")
         self.assertIsNotNone(result.run_id)
         self.assertGreater(len(result.run_id), 0)
 
     def test_reliability_scores_set(self):
         with patch("src.llm.call", side_effect=_mock_llm):
-            result = run_pipeline(self.sample_record, index_path=self.index_path)
+            result = run_pipeline(self.sample_record, index_path=self.index_path, extraction_check="structural")
         self.assertIsNotNone(result.reliability_score_before)
         self.assertTrue(0.0 <= result.reliability_score_before <= 1.0)
 
     def test_evidence_retrieved(self):
         with patch("src.llm.call", side_effect=_mock_llm):
-            result = run_pipeline(self.sample_record, index_path=self.index_path)
+            result = run_pipeline(self.sample_record, index_path=self.index_path, extraction_check="structural")
         check_worthy = [c for c in result.claims if c.check_worthy]
         for c in check_worthy:
             self.assertGreater(len(c.evidence), 0)
@@ -137,7 +137,7 @@ class TestPipeline(unittest.TestCase):
         out_path = Path(self.tmp_dir.name) / "output.jsonl"
         with patch("src.llm.call", side_effect=_mock_llm):
             results = run_pipeline_batch([self.sample_record], output_path=str(out_path),
-                                         index_path=self.index_path)
+                                         index_path=self.index_path, extraction_check="structural")
         self.assertEqual(len(results), 1)
         self.assertTrue(out_path.exists())
 
@@ -174,7 +174,7 @@ class TestPipeline(unittest.TestCase):
             patch("src.pipeline.repair", side_effect=fake_repair),
             patch("src.claim_tracking.llm.call", return_value='{}'),
         ):
-            result = run_pipeline(record, max_repair_iterations=2)
+            result = run_pipeline(record, max_repair_iterations=2, extraction_check="structural")
 
         self.assertEqual(repaired_inputs, ["Original.", "First revised."])
         self.assertEqual(result.claims[0].id, "loop_c0")
@@ -198,7 +198,7 @@ class TestPipeline(unittest.TestCase):
             patch("src.pipeline.retrieve", side_effect=lambda candidate, **kwargs: candidate),
             patch("src.pipeline.verify", side_effect=fake_verify),
         ):
-            result = run_pipeline(record, use_existing_claims=True)
+            result = run_pipeline(record, use_existing_claims=True, extraction_check="structural")
 
         self.assertEqual([claim.id for claim in result.claims], ["human_claim_7"])
         self.assertEqual(result.repair_iterations, 0)
@@ -221,7 +221,7 @@ class TestPipeline(unittest.TestCase):
             patch("src.repair.llm.call", return_value="REMOVE"),
         ):
             result = run_pipeline(
-                record, use_existing_claims=True, repair_policy="rewrite+remove",
+                record, use_existing_claims=True, repair_policy="rewrite+remove", extraction_check="structural",
             )
 
         self.assertEqual(result.repaired_answer, "")

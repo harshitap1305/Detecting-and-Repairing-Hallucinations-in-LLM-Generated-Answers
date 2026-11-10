@@ -29,6 +29,7 @@ from src.retrieve import retrieve, validate_retrieval_options
 from src.verify import verify, verification_summary
 from src.repair import repair
 from src.claim_tracking import track_claims
+from src.extraction_check import extraction_coverage
 
 
 def run_pipeline(
@@ -43,6 +44,10 @@ def run_pipeline(
     retrieval_max_queries: int = 3,
     retrieval_max_passages: int = 20,
     tracking_max_claims: int = 64,
+    extraction_check: str = "semantic_v1",
+    extraction_max_attempts: int = 2,
+    extraction_max_checks: int = 2,
+    extraction_max_claims: int = 64,
     # ── LLM & Verifier ──
     llm_model: str = "llama-3.3-70b-versatile",
     provider: str = "groq",
@@ -73,6 +78,15 @@ def run_pipeline(
     if type(tracking_max_claims) is not int or not 1 <= tracking_max_claims <= 512:
         raise ValueError("tracking_max_claims must be between 1 and 512")
     validate_retrieval_options(query_strategy, retrieval_max_queries, retrieval_max_passages, top_k)
+    if extraction_check not in ("structural", "semantic_v1"):
+        raise ValueError("extraction_check must be structural or semantic_v1")
+    for name, value, maximum in (("extraction_max_attempts", extraction_max_attempts, 4),
+                                 ("extraction_max_checks", extraction_max_checks, 4),
+                                 ("extraction_max_claims", extraction_max_claims, 128)):
+        if type(value) is not int or not 1 <= value <= maximum:
+            raise ValueError(f"{name} must be between 1 and {maximum}")
+    extraction_options = dict(extraction_check=extraction_check, max_retries=extraction_max_attempts,
+                              max_checks=extraction_max_checks, max_check_claims=extraction_max_claims)
     retrieval_options = dict(
         index_path=index_path, method=retriever_method, top_k=top_k,
         faiss_index_path=faiss_index_path, passages_path=passages_path,
@@ -121,10 +135,12 @@ def run_pipeline(
     if use_existing_claims:
         if not record.claims:
             raise ValueError("use_existing_claims requires a nonempty claim inventory")
+        record.decomposition_diagnostics = {"semantics_version": 4, "status": "supplied_inventory",
+                                            "reason": "supplied_inventory_not_extraction_assessed"}
         _log("Initial Pass: Using supplied claim inventory...")
     else:
         _log("Initial Pass: Decomposing...")
-        record = decompose(record, model=llm_model, provider=provider)
+        record = decompose(record, model=llm_model, provider=provider, **extraction_options)
     _log(f"  Extracted {len(record.claims)} claims ({len(record.check_worthy_claims)} check-worthy)")
 
     _log("Initial Pass: Retrieving and verifying evidence...")
@@ -138,6 +154,7 @@ def run_pipeline(
     # ── Iterative Repair & Re-verification Loop (Stages 4 & 5) ─────────────────
     current_answer = record.answer
     original = copy.deepcopy(record)
+    before_extraction = extraction_coverage(original)
     repair_history = []
     working_record = copy.deepcopy(record)
     history = []
@@ -145,6 +162,11 @@ def run_pipeline(
     def snapshot(candidate, stage):
         tracking = track_claims(original, candidate, model=llm_model, provider=provider,
                                 max_claims=tracking_max_claims)
+        candidate_extraction = extraction_coverage(candidate)
+        tracking["target_verification_success"] = tracking["factual_success"]
+        tracking["extraction_coverage"] = {"original": before_extraction, "candidate": candidate_extraction}
+        tracking["factual_success"] = bool(tracking["factual_success"]
+            and before_extraction["status"] == "passed" and candidate_extraction["status"] == "passed")
         history.append({"stage": stage, "answer": candidate.answer,
                         "claims": [asdict(c) for c in candidate.claims],
                         "decomposition": copy.deepcopy(candidate.decomposition_diagnostics),
@@ -160,6 +182,13 @@ def run_pipeline(
     for iteration in range(1, max_repair_iterations + 1):
         hallucinated = working_record.hallucinated_claims
 
+        if (extraction_check == "semantic_v1" and working_record.answer.strip()
+                and ((not use_existing_claims and before_extraction["status"] != "passed")
+                     or (working_record.answer != original.answer
+                         and extraction_coverage(working_record)["status"] != "passed"))):
+            stop_reason = "unresolved_extraction_coverage"
+            _log(f"Iteration {iteration}: Unresolved extraction; abstaining from repair.")
+            break
         if not working_record.check_worthy_claims:
             stop_reason = "empty_answer" if not current_answer.strip() else "no_check_worthy_claims"
             _log(f"Iteration {iteration}: {stop_reason}; factual verification is unavailable.")
@@ -201,7 +230,7 @@ def run_pipeline(
                 question=record.question,
                 answer=current_answer,
             )
-            rev_candidate = decompose(rev_candidate, model=llm_model, provider=provider)
+            rev_candidate = decompose(rev_candidate, model=llm_model, provider=provider, **extraction_options)
             rev_candidate = ground(rev_candidate)
 
             # The next repair must use the revised answer and its own sentence
@@ -231,7 +260,7 @@ def run_pipeline(
             question=record.question,
             answer=record.repaired_answer,
         )
-        final_check = decompose(final_check, model=llm_model, provider=provider)
+        final_check = decompose(final_check, model=llm_model, provider=provider, **extraction_options)
         final_check = ground(final_check)
         after = verification_summary(final_check)
         current_tracking = snapshot(final_check, "final")
@@ -247,12 +276,19 @@ def run_pipeline(
     elif (stop_reason in ("budget_exhausted", "all_targets_verified")
           and not current_tracking["factual_success"] and after["supported"] == after["check_worthy"]):
         stop_reason = "unresolved_target_coverage"
+    after_extraction = current_tracking["extraction_coverage"]["candidate"]
+    if ((original.decomposition_diagnostics or {}).get("status") == "unresolved_coverage"
+            or (history[-1].get("decomposition") or {}).get("status") == "unresolved_coverage"
+            or (after["check_worthy"] and after["supported"] == after["check_worthy"]
+                and (before_extraction["status"] != "passed" or after_extraction["status"] != "passed"))):
+        stop_reason = "unresolved_extraction_coverage"
     record.claims = copy.deepcopy(original.claims)
     record.claim_tracking = {"semantics_version": 1,
                              "original_claims": [asdict(c) for c in original.claims],
                              "stages": history, "final": current_tracking}
     record.verification_diagnostics = {
         "semantics_version": 2, "before": before, "after": after, "stop_reason": stop_reason,
+        "extraction_coverage": {"before": before_extraction, "after": after_extraction},
     }
     record.repair_diagnostics = {"semantics_version": 1, "guard_mode": repair_guard, "iterations": repair_history}
     record.repair_iterations = total_iterations_run

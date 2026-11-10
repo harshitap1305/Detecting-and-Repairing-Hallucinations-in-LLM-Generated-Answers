@@ -26,6 +26,10 @@ def execute(system: dict, record: AnswerRecord, task: str, options: dict) -> dic
         "retrieval_max_queries": options.get("retrieval_max_queries", 3),
         "retrieval_max_passages": options.get("retrieval_max_passages", 20),
         "tracking_max_claims": options.get("tracking_max_claims", 64),
+        "extraction_check": options.get("extraction_check", "semantic_v1"),
+        "extraction_max_attempts": options.get("extraction_max_attempts", 2),
+        "extraction_max_checks": options.get("extraction_max_checks", 2),
+        "extraction_max_claims": options.get("extraction_max_claims", 64),
         "use_existing_claims": task == "claim_verification",
         "max_repair_iterations": options["max_repair_iterations"] if task == "repair" else 0,
     }

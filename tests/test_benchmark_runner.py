@@ -72,6 +72,10 @@ class TestBenchmarkRunner(unittest.TestCase):
         self.assertEqual(options["retrieval_max_queries"], 3)
         self.assertEqual(options["retrieval_max_passages"], 20)
         self.assertEqual(options["tracking_max_claims"], 64)
+        self.assertEqual(options["extraction_check"], "semantic_v1")
+        self.assertEqual(options["extraction_max_attempts"], 2)
+        self.assertEqual(options["extraction_max_checks"], 2)
+        self.assertEqual(options["extraction_max_claims"], 64)
         with self.assertRaisesRegex(ValueError, "Resume identity changed"):
             run_benchmark(**self.kwargs, resume=True, options={"retrieval_max_queries": 4})
 
@@ -259,7 +263,7 @@ class TestNativeAdapters(unittest.TestCase):
         from src.experiments.protocol import SYSTEMS
         from src.schema import AnswerRecord, EvidencePassage
         evidence = EvidencePassage(doc_id="e", title="Synthetic", text="Synthetic answer.")
-        options = {**DEFAULTS, "index_path": "unused"}
+        options = {**DEFAULTS, "index_path": "unused", "extraction_check": "structural"}
         def llm_response(prompt, **kwargs):
             if "NOW DECOMPOSE" in prompt:
                 return '[{"claim":"Synthetic factual claim.","sentence_id":0,"check_worthy":true}]'
@@ -311,7 +315,7 @@ class TestNativeAdapters(unittest.TestCase):
         from src.experiments.adapters import execute
         from src.experiments.runner import DEFAULTS
         from src.schema import AnswerRecord
-        options = {**DEFAULTS, "index_path": "unused"}
+        options = {**DEFAULTS, "index_path": "unused", "extraction_check": "structural"}
         record = AnswerRecord(id="r", source_dataset="fixture", question="Q?", answer="A.")
         with patch("src.pipeline.run_pipeline", return_value=record) as pipeline:
             execute({"id": "pipeline", "retrieval": "bm25"}, record, "claim_verification", options)

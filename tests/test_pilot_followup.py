@@ -66,7 +66,7 @@ def test_pipeline_nonfactual_answer_does_not_claim_success(budget, capsys):
     r = record('A wonderful sight!', 'What is your opinion?')
     with patch('src.llm.call', return_value=inventory(r.answer, False)), \
             patch('src.pipeline.retrieve', side_effect=lambda r, **kw: r):
-        run_pipeline(r, max_repair_iterations=budget, verbose=True)
+        run_pipeline(r, max_repair_iterations=budget, verbose=True, extraction_check="structural")
     assert r.reliability_score_before is r.reliability_score_after is None
     assert r.verification_diagnostics['stop_reason'] == 'no_check_worthy_claims'
     assert r.repair_iterations == 0
@@ -90,7 +90,7 @@ def test_reverification_losing_all_targets_cannot_be_perfect(candidate):
             patch('src.pipeline.retrieve', side_effect=lambda r, **kw: r), \
             patch('src.verify.verify_claim_llm', side_effect=lambda c, **kw: setattr(c, 'label', 'Unverifiable')), \
             patch('src.pipeline.repair', side_effect=repair):
-        run_pipeline(r)
+        run_pipeline(r, extraction_check="structural")
     assert r.reliability_score_before == 0
     assert r.reliability_score_after is None
     assert r.verification_diagnostics['before']['unverifiable'] == 1
@@ -108,7 +108,7 @@ def test_noop_is_unresolved_not_convergence_success():
     with patch('src.pipeline.retrieve', side_effect=lambda r, **kw: r), \
             patch('src.verify.verify_claim_llm', side_effect=lambda c, **kw: setattr(c, 'label', 'Unverifiable')), \
             patch('src.pipeline.repair', side_effect=no_op):
-        run_pipeline(r, use_existing_claims=True)
+        run_pipeline(r, use_existing_claims=True, extraction_check="structural")
     assert r.verification_diagnostics['stop_reason'] == 'unchanged_answer'
     assert r.reliability_score_after == 0
 

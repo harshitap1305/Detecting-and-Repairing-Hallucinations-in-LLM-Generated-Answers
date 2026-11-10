@@ -30,7 +30,9 @@ DEFAULTS = {"provider": "groq", "model": "llama-3.3-70b-versatile", "model_revis
             "faiss_index_path": None, "passages_path": None,
             "query_strategy": "contextual_v1", "retrieval_max_queries": 3,
             "retrieval_max_passages": 20, "tracking_max_claims": 64, "repair_guard": "grounded_v1",
-            "reasoning_effort": "low", "gptoss_min_completion_tokens": 4096}
+            "reasoning_effort": "low", "gptoss_min_completion_tokens": 4096,
+            "extraction_check": "semantic_v1", "extraction_max_attempts": 2,
+            "extraction_max_checks": 2, "extraction_max_claims": 64}
 
 
 def now():
@@ -87,6 +89,11 @@ def resolve_options(config_path: Path, config: dict, options: dict | None) -> di
     for key in ("top_k", "n_samples", "max_repair_iterations"):
         if type(result[key]) is not int or result[key] < 1:
             raise ValueError(f"{key} must be a positive integer")
+    if result["extraction_check"] not in ("structural", "semantic_v1"):
+        raise ValueError("extraction_check must be structural or semantic_v1")
+    for key, maximum in (("extraction_max_attempts", 4), ("extraction_max_checks", 4), ("extraction_max_claims", 128)):
+        if type(result[key]) is not int or not 1 <= result[key] <= maximum:
+            raise ValueError(f"{key} must be between 1 and {maximum}")
     if result["repair_guard"] not in ("legacy", "grounded_v1"):
         raise ValueError("repair_guard must be legacy or grounded_v1")
     if result["reasoning_effort"] not in ("low", "medium", "high"):

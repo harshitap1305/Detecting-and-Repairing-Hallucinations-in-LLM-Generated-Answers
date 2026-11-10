@@ -1,9 +1,9 @@
 # Implementation plan: defects exposed by the v3 pilot
 
-Status: phases 1–2 implemented with offline regression coverage. Phases 3–5
-remain planned. Attribution is structurally validated model metadata; semantic
-checking and pipeline coverage gating are not yet implemented. No new live run
-has been performed.
+Status: phases 1–4 implemented with offline regression coverage. Phase 5
+validation/live execution and new human assessment remain pending. Semantic
+checks and extraction-aware pipeline gating are model diagnostics, not independent
+factual evaluation. No new live run has been performed.
 
 ## Scope and baseline
 

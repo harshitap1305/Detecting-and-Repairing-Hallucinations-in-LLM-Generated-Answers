@@ -130,11 +130,11 @@ def test_pipeline_freezes_original_and_gates_missing_target_success():
             patch('src.claim_tracking.llm.call', return_value=json.dumps({
                 'links': [group(['a'], ['x'], 'retained'), group(['b'], [], 'unresolved')],
                 'candidate_only_ids': []})) as model:
-        result = run_pipeline(r, use_existing_claims=True)
+        result = run_pipeline(r, use_existing_claims=True, extraction_check="structural")
     assert result.claims == initial
     assert result.claim_tracking['original_claims'][0]['text'] == initial[0].text
     assert result.claim_tracking['final']['coverage'] == .5
-    assert result.verification_diagnostics['stop_reason'] == 'unresolved_target_coverage'
+    assert result.verification_diagnostics['stop_reason'] == 'unresolved_extraction_coverage'
     assert model.call_count == 1  # verified candidate reused, no duplicate final pass
     assert result.reliability_score_after == 1  # score describes current claims only
     assert len(result.claim_tracking['stages']) == 2

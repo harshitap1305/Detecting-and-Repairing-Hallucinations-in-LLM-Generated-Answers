@@ -175,7 +175,7 @@ def test_pipeline_verifies_expanded_evidence_before_repair(index):
         result = run_pipeline(r, index_path=index, top_k=2, use_existing_claims=True)
     assert len(verdicts) == 2
     assert result.claims[0].label == 'Supported'
-    assert result.verification_diagnostics['stop_reason'] == 'all_targets_verified'
+    assert result.verification_diagnostics['stop_reason'] == 'unresolved_extraction_coverage'
     assert len(result.retrieval_diagnostics['claims'][0]['queries']) <= 3
 
 
