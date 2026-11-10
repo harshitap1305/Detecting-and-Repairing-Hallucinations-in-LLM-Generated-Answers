@@ -54,3 +54,16 @@ is for identical interrupted runs only.
 
 Source questions, citations, reviewer details, and traces remain private. The
 100 selected test records are reserved for the later frozen test evaluation.
+
+
+## FEVER download endpoint
+
+The old S3 bucket URL can return HTTP 404. Notebook 05 now uses
+`https://fever.ai/download/fever/wiki-pages.zip`, with the
+[authors' Zenodo deposit](https://zenodo.org/records/4925954) as fallback. The
+published MD5 is checked before a partial download becomes the final ZIP;
+SHA-256/source metadata is saved beside the archive. This uses the same FEVER
+corpus, not a different dataset. Re-run the updated index cell after this error;
+there is no need to repeat annotation upload or environment setup in the same
+active Colab session. Existing valid indexes and verified archives are reused.
+The notebook retains the selected Python 3.12 environment and output paths.

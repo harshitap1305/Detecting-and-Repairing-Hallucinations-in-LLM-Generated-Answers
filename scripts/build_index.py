@@ -3,7 +3,7 @@ build_index.py — Build BM25 and FAISS retrieval indexes over Wikipedia passage
 
 Tier A: FEVER wiki-pages (2017 Wikipedia intros, gold evidence labels).
          Download from fever.ai:
-           wget https://s3-eu-west-1.amazonaws.com/fever.ai/wiki-pages.zip
+           wget https://fever.ai/download/fever/wiki-pages.zip
            unzip wiki-pages.zip -d data/raw/fever/
 
 Tier B: Scoped subset of Wikipedia 20231101.en (Phase 5+).
@@ -62,7 +62,7 @@ def build_passage_list_tier_a(
     wiki_dir = Path("data/raw/fever/wiki-pages")
     if not wiki_dir.exists():
         print("⚠  FEVER wiki-pages not found.")
-        print("   Download: wget https://s3-eu-west-1.amazonaws.com/fever.ai/wiki-pages.zip")
+        print("   Download: wget https://fever.ai/download/fever/wiki-pages.zip")
         print("   Extract:  unzip wiki-pages.zip -d data/raw/fever/")
         return []
 

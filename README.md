@@ -91,7 +91,7 @@ python scripts/download_data.py --output_dir data/processed
 
 ```bash
 # Download FEVER wiki-pages first:
-wget https://s3-eu-west-1.amazonaws.com/fever.ai/wiki-pages.zip
+wget https://fever.ai/download/fever/wiki-pages.zip
 unzip wiki-pages.zip -d data/raw/fever/
 
 # Build BM25 index (fast):
