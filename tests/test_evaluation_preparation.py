@@ -158,5 +158,38 @@ class TestEvaluationPreparation(unittest.TestCase):
                 require_segmenter(self.config)
 
 
+class TestDraftClaimInventory(unittest.TestCase):
+    def test_draft_inventory_creates_and_resumes_records(self):
+        from scripts.draft_claim_inventory import draft_inventory
+        from src.schema import AnswerRecord, Claim
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            in_path = root / "in.jsonl"
+            out_path = root / "out.jsonl"
+            rec1 = AnswerRecord(id="r1", source_dataset="halueval", split="dev", question="Q1?", answer="A1.")
+            rec2 = AnswerRecord(id="r2", source_dataset="halueval", split="dev", question="Q2?", answer="A2.")
+            in_path.write_text(rec1.to_jsonl_line() + "\n" + rec2.to_jsonl_line() + "\n", encoding="utf-8")
+
+            def mock_decompose(record, **kwargs):
+                record.claims = [Claim(id=f"{record.id}_c1", text=record.answer, sentence_id=0, check_worthy=True)]
+                return record
+
+            with patch("scripts.draft_claim_inventory.decompose", side_effect=mock_decompose):
+                draft_inventory(in_path, out_path, extraction_check="structural")
+
+            lines = out_path.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(lines), 2)
+            first = AnswerRecord.from_jsonl_line(lines[0])
+            self.assertEqual(len(first.claims), 1)
+            self.assertEqual(first.claims[0].id, "r1_c1")
+
+            # Test resumption: running again should not duplicate
+            with patch("scripts.draft_claim_inventory.decompose", side_effect=mock_decompose):
+                draft_inventory(in_path, out_path, extraction_check="structural")
+            lines_after = out_path.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(lines_after), 2)
+
+
 if __name__ == "__main__":
     unittest.main()
