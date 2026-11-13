@@ -14,5 +14,5 @@
   "extraction_max_attempts": 2,
   "extraction_max_checks": 2,
   "extraction_max_claims": 64,
-  "entity_planner_version": 2
+  "entity_planner_version": 3
 }

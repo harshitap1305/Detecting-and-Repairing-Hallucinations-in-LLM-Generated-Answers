@@ -113,7 +113,7 @@ def test_missing_legacy_attribution_stays_unknown_not_accepted():
 def test_valid_claim_attribution_survives_real_decompose_and_record_roundtrip():
     r = AnswerRecord(id='r', source_dataset='synthetic', question=Q, answer=A)
     with patch('src.llm.call', return_value=json.dumps([item()])):
-        decompose(r)
+        decompose(r, extraction_check="structural")
     attribution = r.decomposition_diagnostics['attribution']
     assert r.claims[0].span == [0, len(A)]
     assert AnswerRecord.from_jsonl_line(r.to_jsonl_line()).decomposition_diagnostics['attribution'] == attribution
@@ -124,12 +124,12 @@ def test_bad_attribution_retries_with_feedback_and_exhaustion_is_unresolved():
     bad['attribution']['bindings'][0]['answer_text'] = 'Not in the answer'
     r = AnswerRecord(id='r', source_dataset='synthetic', question=Q, answer=A)
     with patch('src.llm.call', side_effect=[json.dumps([bad]), json.dumps([item()])]) as model:
-        decompose(r)
+        decompose(r, extraction_check="structural")
     assert model.call_count == 2
     assert 'Malformed answer attribution' in model.call_args.kwargs['prompt']
     with patch('src.llm.call', return_value=json.dumps([bad])), execution():
         with pytest.raises(ValueError, match='Malformed answer attribution'):
-            decompose(r)
+            decompose(r, extraction_check="structural")
 
 
 def test_contract_is_copied_and_is_not_a_semantic_checker():

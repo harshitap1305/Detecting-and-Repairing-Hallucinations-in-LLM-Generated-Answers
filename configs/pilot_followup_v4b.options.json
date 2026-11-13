@@ -14,7 +14,7 @@
   "extraction_max_attempts": 2,
   "extraction_max_checks": 2,
   "extraction_max_claims": 64,
-  "entity_planner_version": 2,
+  "entity_planner_version": 3,
   "attribution_anchor_mode": "unique_quote_v1",
   "rate_limit_retries": 3,
   "rate_limit_wait_budget": 30.0

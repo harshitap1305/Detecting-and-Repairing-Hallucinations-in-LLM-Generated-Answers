@@ -88,13 +88,15 @@ def run_b7(
     model: str = "llama-3.3-70b-versatile",
     provider: str = "groq",
     revise: bool = True,
+    extraction_check: str = "structural",
 ) -> AnswerRecord:
     """
     Run Factcheck-GPT baseline on an AnswerRecord.
     """
     # 1. Claim decomposition
     if not record.claims:
-        record = decompose(record, model=model, provider=provider)
+        record = decompose(record, model=model, provider=provider,
+                           extraction_check=extraction_check)
 
     findings: List[str] = []
     # 2. Retrieve & stance classify

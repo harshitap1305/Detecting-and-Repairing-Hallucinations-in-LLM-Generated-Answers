@@ -45,10 +45,10 @@ def test_decompose_records_reanchoring_and_strict_mode_still_rejects_bad_offsets
     item=raw_item()
     r=AnswerRecord(id='r',source_dataset='synthetic',question='What is Nera known for?',answer='Surveying')
     with patch('src.llm.call',return_value=json.dumps([item])):
-        decompose(r)
+        decompose(r, extraction_check='structural')
     assert r.decomposition_diagnostics['attempt_history'][0]['span_repairs']
     with patch('src.llm.call',return_value=json.dumps([item])):
-        decompose(r,attribution_anchor_mode='strict')
+        decompose(r,attribution_anchor_mode='strict', extraction_check='structural')
     assert not r.claims
     assert r.decomposition_diagnostics['status']=='unresolved_coverage'
 

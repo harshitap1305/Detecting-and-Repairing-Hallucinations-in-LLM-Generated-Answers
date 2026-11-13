@@ -28,6 +28,8 @@ from src.retrieve import (
     _cache_set_passages,
     retrieve_bm25,
     retrieve,
+    _clean_query_entity,
+    ENTITY_PLANNER_VERSION,
 )
 
 
@@ -209,3 +211,93 @@ class TestRetrieve(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCleanQueryEntity(unittest.TestCase):
+    """Tests for the Planner v3 entity query cleaner (_clean_query_entity)."""
+
+    def test_version_is_3(self):
+        self.assertEqual(ENTITY_PLANNER_VERSION, 3)
+
+    def test_no_change_for_clean_entity(self):
+        self.assertEqual(_clean_query_entity("Alexander Graham Bell"), "Alexander Graham Bell")
+
+    def test_deduplicates_repeated_name_runs(self):
+        # FEVER link annotations sometimes produce "Name Name" repetitions.
+        result = _clean_query_entity("Alexander Graham Bell Alexander Graham Bell")
+        self.assertEqual(result, "Alexander Graham Bell")
+
+    def test_deduplicates_case_insensitive(self):
+        result = _clean_query_entity("Edinburgh Edinburgh")
+        self.assertEqual(result, "Edinburgh")
+
+    def test_preserves_different_words_in_order(self):
+        result = _clean_query_entity("Marie Curie Nobel Prize")
+        self.assertEqual(result, "Marie Curie Nobel Prize")
+
+    def test_truncates_very_long_entity_at_word_boundary(self):
+        # Construct a string that exceeds 60 chars
+        long_entity = "Alexander " * 10  # 100 chars
+        result = _clean_query_entity(long_entity.strip())
+        self.assertLessEqual(len(result), 60)
+        # Must end on a complete word (no trailing partial word)
+        self.assertFalse(result.endswith(" "))
+
+    def test_single_word_beyond_limit_is_returned_as_is(self):
+        # A single word longer than 60 chars has no space to truncate at;
+        # the string is truncated hard at _ENTITY_QUERY_MAX_CHARS (60) chars.
+        long_word = "A" * 70
+        result = _clean_query_entity(long_word)
+        self.assertEqual(len(result), 60)
+
+    def test_empty_string(self):
+        self.assertEqual(_clean_query_entity(""), "")
+
+    def test_linked_entity_query_uses_cleaned_entity(self):
+        """Integration: a linked-entity query must not contain repeated name runs."""
+        import importlib
+        retrieval = importlib.import_module("src.retrieve")
+
+        record = AnswerRecord(
+            id="planner_v3_test", source_dataset="manual", split="dev",
+            question="Who invented the telephone?",
+            answer="Alexander Graham Bell invented the telephone.",
+        )
+        record.claims = [
+            Claim(id="planner_v3_test_c1",
+                  text="Alexander Graham Bell invented the telephone.",
+                  sentence_id=0)
+        ]
+        # Passage with a repeated FEVER-style linked entity name in body.
+        seed_passage = EvidencePassage(
+            doc_id="Bell_0", title="Alexander Graham Bell",
+            text="Title: Alexander Graham Bell.\n"
+                 "[[Alexander Graham Bell|Alexander Graham Bell]] invented many things.",
+            score=1.0,
+        )
+
+        queries_seen: list[str] = []
+
+        def capturing_fetch(query, index_path, method, fetch_k,
+                            faiss_index_path, passages_path, encoder_name):
+            queries_seen.append(query)
+            return [seed_passage]
+
+        # Build a real (picklable) index so _index_identity() succeeds.
+        with tempfile.TemporaryDirectory() as tmp:
+            idx_path = _build_test_index(tmp)
+            with mock.patch.object(retrieval, "_fetch_query", side_effect=capturing_fetch), \
+                 mock.patch.object(retrieval, "_cache_get_passages", return_value=None), \
+                 mock.patch.object(retrieval, "_cache_set_passages"):
+                retrieval.retrieve(
+                    record, index_path=idx_path, method="bm25",
+                    query_strategy="contextual_v1", max_queries=3, top_k=1,
+                )
+
+        # At least one query was issued
+        self.assertTrue(queries_seen, "No queries were issued")
+        for q in queries_seen:
+            self.assertNotIn(
+                "Alexander Graham Bell Alexander Graham Bell", q,
+                f"Repeated entity name found in query: {q!r}"
+            )

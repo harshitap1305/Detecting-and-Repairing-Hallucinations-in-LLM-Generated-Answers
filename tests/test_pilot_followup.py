@@ -159,7 +159,7 @@ def test_native_adapter_preserves_versioned_diagnostics():
 def test_contextual_fragments_retry_and_keep_original_span(question, answer, claim):
     r = record(answer, question)
     with patch('src.llm.call', side_effect=[inventory(answer, False), inventory(claim)]) as call:
-        decompose(r)
+        decompose(r, extraction_check='structural')
     assert call.call_count == 2
     assert call.call_args.kwargs['use_cache'] is False
     assert 'RETRY FEEDBACK' in call.call_args.kwargs['prompt']
@@ -177,7 +177,7 @@ def test_contextual_fragments_retry_and_keep_original_span(question, answer, cla
 def test_hedged_factual_payload_remains_checkworthy_without_strengthening(answer, claim):
     r = record(answer)
     with patch('src.llm.call', side_effect=[inventory('Mira Vale was born in Alder Bay.'), inventory(claim)]) as call:
-        decompose(r)
+        decompose(r, extraction_check='structural')
     assert call.call_count == 2
     assert r.check_worthy_claims[0].text == claim
 
@@ -185,13 +185,13 @@ def test_hedged_factual_payload_remains_checkworthy_without_strengthening(answer
 def test_exhausted_fragment_coverage_never_invents_a_fact():
     r = record('Monthly')
     with patch('src.llm.call', return_value=inventory('Monthly', False)) as call:
-        decompose(r)
+        decompose(r, extraction_check='structural')
     assert call.call_count == 2
     assert r.claims == []
     assert r.decomposition_diagnostics['status'] == 'unresolved_coverage'
     with patch('src.llm.call', return_value=inventory('Monthly', False)), execution():
         with pytest.raises(ValueError, match='unresolved coverage'):
-            decompose(record('Monthly'))
+            decompose(record('Monthly'), extraction_check='structural')
 
 
 @pytest.mark.parametrize('answer', ['I think it is beautiful.', 'Please visit the museum.',
@@ -199,7 +199,7 @@ def test_exhausted_fragment_coverage_never_invents_a_fact():
 def test_nonfactual_text_does_not_trigger_factual_fragment_retry(answer):
     r = record(answer, 'What is your opinion?')
     with patch('src.llm.call', return_value=inventory(answer, False)) as call:
-        decompose(r)
+        decompose(r, extraction_check='structural')
     assert call.call_count == 1
     assert not r.check_worthy_claims
     assert r.decomposition_diagnostics['status'] == 'no_check_worthy_claims'

@@ -32,7 +32,7 @@ DEFAULTS = {"provider": "groq", "model": "llama-3.3-70b-versatile", "model_revis
             "retrieval_max_passages": 20, "tracking_max_claims": 64, "repair_guard": "grounded_v1",
             "reasoning_effort": "low", "gptoss_min_completion_tokens": 4096,
             "extraction_check": "semantic_v1", "extraction_max_attempts": 2,
-            "extraction_max_checks": 2, "extraction_max_claims": 64, "entity_planner_version": 2, "attribution_anchor_mode": "unique_quote_v1",
+            "extraction_max_checks": 2, "extraction_max_claims": 64, "entity_planner_version": 3, "attribution_anchor_mode": "unique_quote_v1",
             "rate_limit_retries": 3, "rate_limit_wait_budget": 30.0}
 
 

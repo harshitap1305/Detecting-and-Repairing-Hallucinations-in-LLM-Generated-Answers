@@ -93,7 +93,7 @@ class TestPilotWorkflow(unittest.TestCase):
         config=json.loads(json.dumps(self.fixture.config))
         profile=json.loads((ROOT/'configs/pilot_followup_v4.options.json').read_text())
         options=resolve_options(self.fixture.config_path,config,profile)
-        self.assertEqual(options['entity_planner_version'],2)
+        self.assertEqual(options['entity_planner_version'],3)
         self.assertEqual(options['extraction_check'],'semantic_v1')
         self.assertEqual(options['extraction_max_attempts'],2)
         self.assertEqual(options['extraction_max_checks'],2)

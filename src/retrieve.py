@@ -362,7 +362,41 @@ def _context_reason(claim, candidates, top_k):
     return None
 
 
-ENTITY_PLANNER_VERSION = 2
+ENTITY_PLANNER_VERSION = 3
+
+# Maximum character length for the entity portion of a linked-entity query.
+# Long FEVER link annotations can produce repeated-name strings; cap them so
+# BM25 is not overwhelmed by repeated tokens before the claim text is seen.
+_ENTITY_QUERY_MAX_CHARS = 60
+
+
+def _clean_query_entity(text: str) -> str:
+    """Deduplicate repeated word runs and cap length for linked-entity queries.
+
+    FEVER link annotations sometimes flatten multi-token entity names into long
+    repeated-name strings (e.g. "Alexander Graham Bell Alexander Graham Bell").
+    This function:
+      1. Splits on whitespace and removes consecutive duplicate words
+         (case-insensitive) while preserving the first occurrence and order.
+      2. Truncates to _ENTITY_QUERY_MAX_CHARS characters at a word boundary.
+
+    The input is expected to already be normalised by _entity_text().
+    """
+    words = text.split()
+    deduped: list[str] = []
+    seen_lower: set[str] = set()
+    for word in words:
+        wl = word.casefold()
+        if wl not in seen_lower:
+            deduped.append(word)
+            seen_lower.add(wl)
+    result = " ".join(deduped)
+    if len(result) > _ENTITY_QUERY_MAX_CHARS:
+        # Truncate at the last space within the limit.
+        truncated = result[:_ENTITY_QUERY_MAX_CHARS]
+        last_space = truncated.rfind(" ")
+        result = truncated[:last_space] if last_space > 0 else truncated
+    return result
 
 
 def _entity_text(text):
@@ -569,7 +603,9 @@ def retrieve(
             for lead in _linked_entities(seeds, known, record.question + " " + claim.text, lead_decisions):
                 # Attribute terms remain from the fixed target/question. An
                 # entity mention is not asserted as a verified bridge fact.
-                queried = run_query(f"{lead['query_entity']} {claim.text} {record.question}", "linked_entity", lead)
+                # Clean the entity text to remove repeated-name runs (Planner v3).
+                entity_query = _clean_query_entity(lead['query_entity'])
+                queried = run_query(f"{entity_query} {claim.text} {record.question}", "linked_entity", lead)
                 lead_decisions.append({**lead, "decision": "queried" if queried else "not_queried",
                                        "reason": "query_added" if queried else "query_or_passage_budget_exhausted"})
                 if len(query_log) >= max_queries or fetched >= max_passages:

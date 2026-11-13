@@ -265,7 +265,7 @@ def test_formatted_person_to_publication_query_fits_original_budget(index):
     assert {p.doc_id for p in r.claims[0].evidence} == {'person', 'publication'}
     last = r.retrieval_diagnostics['claims'][0]['queries'][-1]
     assert last['kind'] == 'linked_entity' and last['query'].startswith("L'Obs")
-    assert r.retrieval_diagnostics['entity_planner_version'] == 2
+    assert r.retrieval_diagnostics['entity_planner_version'] == 3
 
 
 def test_invalid_leads_leave_query_slot_unused(index):
