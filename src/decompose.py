@@ -152,6 +152,12 @@ CORE PRINCIPLES:
 7. QUESTION BOUNDARIES: A question is not evidence that its premises are true.
    Do not invent missing answers to other clauses of a compound question. If a
    reference is ambiguous, preserve that ambiguity instead of guessing a fact.
+8. SPAN TRACEABILITY: Every claim must be traceable to an exact span of the
+   answer text. Do NOT assert a relation that the answer text does not express.
+   A vague referent ("the battle", "the entity") is only acceptable if the
+   answer itself uses that phrasing. If the precise referent or relation is not
+   present in the answer, mark attribution status as "ambiguous" instead of
+   inventing a specific fact.
 
 OUTPUT FORMAT:
 Return ONLY a valid JSON array of objects:
@@ -278,6 +284,23 @@ Answer: 1998
 Output:
 [{"claim": "The people referred to in the question arrived in 1998.", "sentence_id": 0, "check_worthy": true}]
 Do not invent names for unspecified people.
+
+EXAMPLE 14: Compound question — only one clause answered (synthetic)
+Question: Who founded the FTC? What year was the Clayton Act passed?
+Answer: 1914
+Output:
+[{"claim": "The year 1914 is the answer to one of the two questions asked.", "sentence_id": 0, "check_worthy": false}]
+Do NOT assert "The FTC was founded in 1914" and do NOT assert "The Clayton Act was passed in 1914".
+The answer fragment is ambiguous between the two clauses; mark attribution "ambiguous" and produce no
+check-worthy claim asserting either specific relation unless the answer text explicitly names the relation.
+
+EXAMPLE 15: Vague relation — do not assign an unsupported specific relation (synthetic)
+Question: Which battle marked the turning point of the American Civil War?
+Answer: Gettysburg
+Output:
+[{"claim": "The Battle of Gettysburg is associated with a turning point of the American Civil War.", "sentence_id": 0, "check_worthy": true}]
+Do NOT assert "The Battle of Gettysburg was fought in 1863" or any other fact not stated in the answer.
+Only the relation expressed by the answer (it is THE turning-point battle) may be claimed.
 """
 
 
@@ -400,7 +423,7 @@ def decompose(
     provider: str = "groq",
     max_retries: int = 2,
     min_claim_length: int = 5,
-    extraction_check: str = "structural",
+    extraction_check: str = "semantic_v1",
     max_checks: int = 2,
     max_check_claims: int = 64,
     attribution_anchor_mode: str = "unique_quote_v1",

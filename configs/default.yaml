@@ -42,6 +42,8 @@ pipeline:
   repair_policy: "rewrite+hedge"   # "rewrite+hedge" | "rewrite+remove" | "rewrite-only"
   max_repair_iterations: 2
   min_claim_length: 5              # skip very short claims
+  extraction_check: "semantic_v1"  # "structural" (fast) | "semantic_v1" (full LLM audit)
+  extraction_max_attempts: 2       # retry budget for decompose()
 
 # ─── Cache ───────────────────────────────────────────────────────────────────
 cache:

@@ -132,7 +132,7 @@ class TestDecompose(unittest.TestCase):
             {"claim": "Albert Einstein was born in Ulm, Germany.", "sentence_id": 0, "check_worthy": True},
         ])
         with patch("src.llm.call", return_value=mock_response):
-            result = decompose(record)
+            result = decompose(record, extraction_check="structural")
         self.assertEqual(len(result.claims), 2)
         self.assertEqual(result.claims[0].id, "test_d_001_c1")
         self.assertTrue(result.claims[0].check_worthy)
@@ -154,7 +154,7 @@ class TestDecompose(unittest.TestCase):
             {"claim": "The Eiffel Tower is the most beautiful structure ever.", "sentence_id": 1, "check_worthy": False},
         ])
         with patch("src.llm.call", return_value=mock_response):
-            result = decompose(record)
+            result = decompose(record, extraction_check="structural")
         self.assertEqual(len(result.claims), 3)
         check_worthy_flags = [c.check_worthy for c in result.claims]
         self.assertEqual(check_worthy_flags, [False, True, False])
