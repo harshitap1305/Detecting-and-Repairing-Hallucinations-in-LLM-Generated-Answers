@@ -57,21 +57,31 @@ def draft_inventory(
                 continue
 
             print(f"[{total}] Decomposing record {record.id}...")
-            try:
-                record = decompose(
-                    record,
-                    model=model,
-                    provider=provider,
-                    extraction_check=extraction_check,
-                )
-                out_f.write(record.to_jsonl_line() + "\n")
-                out_f.flush()
-                drafted += 1
-                cw_count = len(record.check_worthy_claims)
-                print(f"    -> {len(record.claims)} claims ({cw_count} check-worthy)")
-            except Exception as exc:
-                errors += 1
-                print(f"    [ERROR] Failed to decompose {record.id}: {exc}")
+            import time
+            success = False
+            for attempt in range(1, 4):
+                try:
+                    record = decompose(
+                        record,
+                        model=model,
+                        provider=provider,
+                        extraction_check=extraction_check,
+                    )
+                    out_f.write(record.to_jsonl_line() + "\n")
+                    out_f.flush()
+                    drafted += 1
+                    cw_count = len(record.check_worthy_claims)
+                    print(f"    -> {len(record.claims)} claims ({cw_count} check-worthy)")
+                    success = True
+                    break
+                except Exception as exc:
+                    if attempt < 3:
+                        wait = attempt * 3
+                        print(f"    [WARN] Attempt {attempt} failed ({exc}). Retrying in {wait}s...")
+                        time.sleep(wait)
+                    else:
+                        errors += 1
+                        print(f"    [ERROR] Failed to decompose {record.id} after 3 attempts: {exc}")
 
     print(f"\nCompleted: {drafted} newly drafted, {len(done_ids)} resumed, {errors} errors out of {total} records.")
 
@@ -97,3 +107,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
