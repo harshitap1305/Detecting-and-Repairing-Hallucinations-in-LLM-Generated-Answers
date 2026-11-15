@@ -80,6 +80,46 @@ def wiki_passages(wiki_dir: Path, chunk_size: int, overlap: int) -> Iterator[dic
                     }
 
 
+def wiki_zip_passages(zip_path: Path, chunk_size: int, overlap: int) -> Iterator[dict]:
+    import io
+    import zipfile
+    if not zip_path.is_file():
+        raise FileNotFoundError(f"FEVER zip file not found: {zip_path}")
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        members = sorted(name for name in zf.namelist() if Path(name).name.startswith("wiki-") and name.endswith(".jsonl"))
+        if not members:
+            raise FileNotFoundError(f"No FEVER wiki-*.jsonl files inside {zip_path}")
+        for member in members:
+            with zf.open(member, "r") as raw_stream:
+                stream = io.TextIOWrapper(raw_stream, encoding="utf-8")
+                for line_number, raw in enumerate(stream, 1):
+                    if not raw.strip():
+                        continue
+                    try:
+                        page = json.loads(raw)
+                    except json.JSONDecodeError as exc:
+                        raise ValueError(f"Invalid JSON at {member}:{line_number}") from exc
+                    if not isinstance(page, dict) or not isinstance(page.get("id"), str):
+                        raise ValueError(f"Invalid wiki page at {member}:{line_number}")
+                    title = page["id"].strip()
+                    if not title:
+                        continue
+                    lines = str(page.get("lines", "")).splitlines()
+                    text = " ".join(
+                        rest.strip()
+                        for raw_line in lines
+                        for _, separator, rest in [raw_line.partition("\t")]
+                        if separator and rest.strip()
+                    )
+                    for chunk_id, chunk in enumerate(chunk_text(text, chunk_size, overlap)):
+                        yield {
+                            "doc_id": f"{title}_{chunk_id}",
+                            "title": title,
+                            "text": f"Title: {title}. {chunk}",
+                            "chunk_id": chunk_id,
+                        }
+
+
 def file_passages(path: Path) -> Iterator[dict]:
     if not path.is_file():
         raise FileNotFoundError(path)
@@ -249,6 +289,7 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--wiki-pages-dir", type=Path)
+    source.add_argument("--wiki-pages-zip", type=Path)
     source.add_argument("--passages-file", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--chunk-size", type=int, default=150)
@@ -259,9 +300,15 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     if args.chunk_size < 1 or not 0 <= args.chunk_overlap < args.chunk_size:
         parser.error("chunk-size must be positive and overlap smaller")
-    rows = (wiki_passages(args.wiki_pages_dir, args.chunk_size, args.chunk_overlap)
-            if args.wiki_pages_dir else file_passages(args.passages_file))
-    source_name = str(args.wiki_pages_dir or args.passages_file)
+    if args.wiki_pages_zip:
+        rows = wiki_zip_passages(args.wiki_pages_zip, args.chunk_size, args.chunk_overlap)
+        source_name = str(args.wiki_pages_zip)
+    elif args.wiki_pages_dir:
+        rows = wiki_passages(args.wiki_pages_dir, args.chunk_size, args.chunk_overlap)
+        source_name = str(args.wiki_pages_dir)
+    else:
+        rows = file_passages(args.passages_file)
+        source_name = str(args.passages_file)
     info = build_index(rows, args.output, source=source_name,
                        max_passages=args.max_passages, batch_size=args.batch_size,
                        overwrite=args.overwrite)
