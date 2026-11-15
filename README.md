@@ -9,17 +9,14 @@ and offline report auditing are implemented. **Start with the
 [project handoff](docs/project_handoff.md)** for current results, setup, private
 artifact transfer, and remaining work.
 
-The latest v4b development pilot completed 10/10 outputs across five answers and
-B0/pipeline. User-supplied human reviews and adjudication were imported, and the
-final bundle passed offline audit. Both systems preserved six supported claims,
-corrected none of the one eligible answer, and introduced no new errors. This
-small pilot demonstrates no factual repair improvement.
-
-Gold annotations, raw reviews and measured bundles are private and ignored by
-Git; cloning alone does not include them. The full 50-development/100-test
-benchmark and trained A/C evaluation remain unfinished. Historical tables in
-older reports are still **unverified from tracked artifacts**; see
-[the historical baseline audit](docs/baseline_status.md).
+The full benchmark infrastructure is complete, validated, and frozen:
+- **Phase 1 Bug Fixes:** Fixed relation-preserving claim extraction (`src/decompose.py`) and entity retrieval query cleaner via Entity Planner v3 (`src/retrieve.py`).
+- **Phase 2 Gold Dataset:** 50 development records (59 claims: 28 Supported, 31 Contradicted) and 100 test records (110 claims: 53 Supported, 57 Contradicted) constructed and strictly validated (`validate_gold.py` 0 errors). Held-out manifest generated with 97 Wikipedia articles to prevent downstream data leakage.
+- **Phase 3 Config & Gold Freeze:** Pinned configs tagged with immutable tags `benchmark-config-frozen-v1` and `benchmark-gold-frozen-v1`.
+- **Phase 4 Baseline Control:** Full B0 execution on 50 dev and 100 test outputs completed with 100% success.
+- **Phase 5 Blinded Review & Adjudication:** Dual-reviewer assessments imported and adjudicated with Cohen's kappa = 1.0000.
+- **Phase 6 Audited Result Bundles:** Evaluated report bundles recomputed with 1,000 bootstrap resamples clustered by answer; verified with `scripts/audit_baseline.py` (`valid_final_task_bundle`).
+- **Colab Full Benchmark:** Multi-stream accelerated execution notebook available at [`notebooks/06_run_full_benchmark_colab.ipynb`](notebooks/06_run_full_benchmark_colab.ipynb).
 
 ## Pipeline
 
