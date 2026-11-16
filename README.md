@@ -4,19 +4,42 @@
 
 ## Current status
 
-The prompted pipeline, reproducible benchmark runner, independent-review tooling,
-and offline report auditing are implemented. **Start with the
-[project handoff](docs/project_handoff.md)** for current results, setup, private
-artifact transfer, and remaining work.
+The project implements claim decomposition, contextual retrieval, three-way
+verification, guarded localized repair, eight baseline systems (B0–B7), and a
+reproducible execution/review/reporting workflow. Entity Planner v3 is installed;
+optional training paths support a FEVER verifier and a Flan-T5 repair editor.
 
-The full benchmark infrastructure is complete, validated, and frozen:
-- **Phase 1 Bug Fixes:** Fixed relation-preserving claim extraction (`src/decompose.py`) and entity retrieval query cleaner via Entity Planner v3 (`src/retrieve.py`).
-- **Phase 2 Gold Dataset:** 50 development records (59 claims: 28 Supported, 31 Contradicted) and 100 test records (110 claims: 53 Supported, 57 Contradicted) constructed and strictly validated (`validate_gold.py` 0 errors). Held-out manifest generated with 97 Wikipedia articles to prevent downstream data leakage.
-- **Phase 3 Config & Gold Freeze:** Pinned configs tagged with immutable tags `benchmark-config-frozen-v1` and `benchmark-gold-frozen-v1`.
-- **Phase 4 Baseline Control:** Full B0 execution on 50 dev and 100 test outputs completed with 100% success.
-- **Phase 5 Blinded Review & Adjudication:** Dual-reviewer assessments imported and adjudicated with Cohen's kappa = 1.0000.
-- **Phase 6 Audited Result Bundles:** Evaluated report bundles recomputed with 1,000 bootstrap resamples clustered by answer; verified with `scripts/audit_baseline.py` (`valid_final_task_bundle`).
-- **Colab Full Benchmark:** Multi-stream accelerated execution notebook available at [`notebooks/06_run_full_benchmark_colab.ipynb`](notebooks/06_run_full_benchmark_colab.ipynb).
+The [project report PDF](docs/report/project_report.pdf),
+[LaTeX source](docs/report/project_report.tex), and
+[report build instructions](docs/report/README.md) are the current submission
+artifacts. The report includes four team-supplied figures covering baseline
+comparison, retrieval, iteration diagnostics, and benchmark distribution.
+
+Result sources are recorded separately:
+
+- **Team-reported broader benchmark:** the team's Drive results describe 50
+  development answers (59 claims: 28 Supported, 31 Contradicted) and 100 test
+  answers (110 claims: 53 Supported, 57 Contradicted), completed B0 execution,
+  dual-reviewer adjudication with Cohen's kappa 1.0000, and answer-cluster
+  bootstrap evaluation. These summaries appear in the report; the corresponding
+  private full-size gold and result bundles require separate transfer from Drive
+  for local recomputation.
+- **Locally audited v4b pilot:** five development answers, seven reviewed claims,
+  and ten completed outputs across B0 and the pipeline. Offline recomputation
+  passed on 16 November 2026. Both systems retained six supported claims, with
+  zero introduced factual errors and a correction outcome of 0/1 eligible answer.
+  The [11 November pilot handoff](docs/project_handoff.md) gives its private paths
+  and audit procedure; its open-work list predates the later planner and benchmark
+  updates.
+- **Frozen revisions:** `benchmark-config-frozen-v1` and
+  `benchmark-gold-frozen-v1` identify versioned repository revisions. Private
+  annotations, model checkpoints, and result bundles are transferred separately.
+
+For a short runnable Colab workflow, start with
+[notebook 07](notebooks/07_run_fast_cloud_demo_colab.ipynb). Use
+[notebook 06](notebooks/06_run_full_benchmark_colab.ipynb) for the full benchmark
+workflow or [notebook 05](notebooks/05_run_reviewed_pilot_colab.ipynb) for the
+reviewed pilot.
 
 ## Pipeline
 
@@ -47,7 +70,9 @@ Repaired answer + per-claim report
 ### 1. Install dependencies
 
 ```bash
-pip install -r requirements.txt
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
 python -m spacy download en_core_web_sm
 ```
 
@@ -55,13 +80,32 @@ python -m spacy download en_core_web_sm
 
 ```bash
 export GROQ_API_KEY="your_key_here"
-# OR create a .env file:
-echo "GROQ_API_KEY=your_key_here" > .env
 ```
 
-### 3. Run the pipeline on a single example
+If using a `.env` file, explicitly call `from dotenv import load_dotenv` and
+`load_dotenv()` before inference. The LLM wrapper reads environment variables;
+it does not automatically load `.env` files.
 
-Build the FEVER BM25 index in step 6 first, then run this example.
+### 3. Build the retrieval index
+
+From the repository root, download/extract FEVER pages and build the BM25 index:
+
+```bash
+# Download FEVER wiki-pages first:
+wget https://fever.ai/download/fever/wiki-pages.zip
+unzip wiki-pages.zip -d data/raw/fever/
+
+# Build BM25 index (fast):
+python scripts/build_index.py --tier A --bm25_only
+
+# Build BM25 + FAISS index (full; needs GPU for speed):
+python scripts/build_index.py --tier A --encoder BAAI/bge-small-en-v1.5
+```
+
+The full-corpus SQLite FTS5 alternative is documented in the
+[training workflow](docs/training_workflow.md) and the Colab notebooks.
+
+### 4. Run the pipeline on a single example
 
 ```python
 from src.schema import AnswerRecord
@@ -80,33 +124,18 @@ print(result.repaired_answer)
 print(result.summary())
 ```
 
-### 4. Run unit tests
+### 5. Prepare datasets for batch inference
 
 ```bash
-pytest tests/ -v
+python scripts/download_data.py --output_dir data/processed \
+  --splits_file data/local_download_splits.json
 ```
 
-### 5. Download datasets
+This writes a separate download split manifest so the command preserves the
+benchmark's existing `data/splits.json`. For the pinned HaluEval benchmark,
+follow the [source preparation instructions](docs/gold_annotation_workflow.md#pinned-halueval-source-preparation).
 
-```bash
-python scripts/download_data.py --output_dir data/processed
-```
-
-### 6. Build retrieval index (requires FEVER wiki-pages)
-
-```bash
-# Download FEVER wiki-pages first:
-wget https://fever.ai/download/fever/wiki-pages.zip
-unzip wiki-pages.zip -d data/raw/fever/
-
-# Build BM25 index (fast):
-python scripts/build_index.py --tier A --bm25_only
-
-# Build BM25 + FAISS index (full; needs GPU for speed):
-python scripts/build_index.py --tier A --encoder BAAI/bge-small-en-v1.5
-```
-
-### 7. Run on a batch of records
+### 6. Run on a batch of records
 
 ```bash
 python -c "
@@ -123,6 +152,19 @@ run_pipeline_batch(records, output_path='results/phase3_pilot.jsonl',
 "
 ```
 
+For formal comparisons, use the [benchmark runner](docs/benchmark_runner.md),
+which records expected outputs, attempts, errors, and experiment identity.
+
+### 7. Run tests
+
+For a dedicated test environment, install the CPU dependencies used by CI:
+
+```bash
+python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+python -m pip install -r requirements-test.txt
+python -m pytest tests/ -q
+```
+
 ---
 
 ## Repository Structure
@@ -131,6 +173,8 @@ run_pipeline_batch(records, output_path='results/phase3_pilot.jsonl',
 project/
 ├── README.md
 ├── requirements.txt
+├── requirements-test.txt     ← CPU tests and offline checks
+├── requirements-evaluation.txt ← pinned pilot runtime dependencies
 ├── requirements-training.txt ← additional A+C training dependencies
 ├── .env                    ← GROQ_API_KEY (not committed)
 ├── docs/
@@ -138,14 +182,17 @@ project/
 │   ├── literature_notes.md
 │   ├── baseline_status.md  ← evidence audit of reported results
 │   ├── training_workflow.md ← A+C training and evaluation steps
-│   └── gold_annotation_workflow.md ← validate human annotations
+│   ├── gold_annotation_workflow.md ← validate human annotations
+│   └── report/              ← LaTeX report, compiled PDF, build instructions
 ├── configs/
-│   ├── default.yaml        ← all model/threshold/policy settings
+│   ├── default.yaml        ← reference configuration
+│   ├── *.options.json      ← benchmark/demo model and pipeline options
+│   ├── evaluation*.yaml    ← benchmark tasks, sources, splits, retrieval
 │   └── ablations/
 ├── data/
 │   ├── raw/                ← downloaded datasets (not committed)
 │   ├── processed/          ← unified-schema JSONL (not committed)
-│   └── gold/               ← human-annotated gold set
+│   └── gold/               ← committed demo samples; private reviewed gold
 ├── indexes/                ← BM25/FAISS indexes (not committed)
 ├── src/
 │   ├── schema.py           ← AnswerRecord, Claim, EvidencePassage
@@ -155,7 +202,8 @@ project/
 │   ├── verify.py           ← Stage 3: claim verification
 │   ├── repair.py           ← Stage 4: answer repair
 │   ├── pipeline.py         ← end-to-end orchestration
-│   ├── evaluate.py         ← metrics (Phase 8)
+│   ├── evaluate.py         ← evaluation metrics
+│   ├── experiments/        ← runner, review, scoring, provenance, report bundles
 │   ├── training/           ← FEVER verifier and repair model code
 │   └── baselines/          ← B0–B7 baseline implementations
 ├── scripts/
@@ -175,8 +223,11 @@ project/
 │   ├── 01_download_data.ipynb   ← Colab: download datasets
 │   ├── 02_build_index.ipynb     ← Colab: build indexes
 │   ├── 03_run_pipeline.ipynb    ← Colab: run & evaluate pipeline
-│   └── 04_train_A_C_colab.ipynb ← Colab: train A+C and save artifacts
-├── results/
+│   ├── 04_train_A_C_colab.ipynb ← Colab: train A+C and save artifacts
+│   ├── 05_run_reviewed_pilot_colab.ipynb ← reviewed five-answer pilot
+│   ├── 06_run_full_benchmark_colab.ipynb ← full benchmark execution
+│   └── 07_run_fast_cloud_demo_colab.ipynb ← 20-answer-per-split demo
+├── results/                ← retained figures; private evaluation bundles
 ├── demo/
 │   └── app.py              ← Gradio demo (Phase 9)
 └── tests/
@@ -192,20 +243,19 @@ project/
 
 ## Colab Workflow
 
-1. Mount Google Drive and set `DRIVE_BASE = "/content/drive/MyDrive/hallucination_project"`
-2. Set `LLM_CACHE_PATH` to a Drive path so the cache survives disconnects
-3. Run the baseline notebooks in order: `01` → `02` → `03`. Use `04` for the
-   A+C model training workflow.
-4. All indexes, processed data, and LLM cache live on Drive
+Choose the notebook for the task:
 
-```python
-# Mount Drive for runs that save data, caches, or checkpoints:
-import os
-from google.colab import drive
-drive.mount('/content/drive')
-DRIVE_BASE = "/content/drive/MyDrive/hallucination_project"
-os.environ["LLM_CACHE_PATH"] = f"{DRIVE_BASE}/llm_cache.db"
-```
+| Notebook | Purpose | Storage |
+|---|---|---|
+| 01 → 02 → 03 | Dataset download, index construction, pipeline execution | Configure the notebook's Drive paths |
+| 04 | Train and evaluate A+C models | `MyDrive/hallucination_project_ac/` |
+| 05 | Reproduce the reviewed pilot | Upload private pilot inputs; export completed results |
+| 06 | Full benchmark execution | `MyDrive/hallucination_full_benchmark/` |
+| 07 | Fast demonstration with 20 dev and 20 test answers | Committed demo gold plus the notebook's configured runtime/Drive paths |
+
+Follow each notebook's setup cells: paths and dependency environments differ.
+The [v4b guide](docs/colab_followup_v4b.md) accompanies notebook 05. Preserve
+run-local caches and immutable attempts when exporting a benchmark run.
 
 For LLM pipeline or comparison cells, add `GROQ_API_KEY` to Colab Secrets and
 read it with `from google.colab import userdata` and
@@ -237,25 +287,36 @@ results only after that run completes.
 
 ## Configuration
 
-All settings live in [`configs/default.yaml`](configs/default.yaml). Key knobs:
+Runtime settings are supplied through the Python API or a benchmark options
+file; [`configs/default.yaml`](configs/default.yaml) is a reference configuration
+and is not automatically loaded by `run_pipeline()`.
 
-| Setting | Default | Description |
-|---|---|---|
-| `llm.provider` | `groq` | LLM provider |
-| `llm.pipeline_model` | `llama-3.3-70b-versatile` | Decompose + verify + repair |
-| `llm.eval_model` | `gemma2-9b-it` | Independent evaluator (different family) |
-| `retriever.default_method` | `bm25` | `bm25` / `dense` / `hybrid` |
-| `retriever.top_k` | `5` | Passages per claim |
-| `pipeline.repair_policy` | `rewrite+hedge` | What to do with unfixable claims |
-| `pipeline.max_repair_iterations` | `2` | Re-verify loops |
+| Entry point | Configuration |
+|---|---|
+| Direct Python API | Keyword arguments to `run_pipeline()` in `src/pipeline.py` |
+| Benchmark protocol | `configs/evaluation*.yaml`: tasks, sources, split sizes, corpus and retrieval |
+| Full benchmark | `configs/full_benchmark_v1.options.json` |
+| Fast demo | `configs/demo.options.json`; structural extraction checks |
+| Reviewed-pilot profile | `configs/pilot_followup_v4b.options.json`; restore the saved manifest/source to reproduce historical settings |
+| NLI thresholds | `configs/calibrated_thresholds.yaml`, loaded by verification code |
+
+Current full-benchmark/demo profiles specify `qwen/qwen3.8-27b` through Groq,
+`rewrite-only`, `grounded_v1`, and planner version 3. The direct API defaults to
+`llama-3.3-70b-versatile`, prompted LLM verification, and `rewrite+hedge`.
+The saved v4b execution used `openai/gpt-oss-120b` and planner version 2; changing
+a current options file does not change that historical run. Record the resolved
+model/settings in each new execution manifest.
 
 ---
 
 ## Datasets
 
+The following datasets have loaders or preparation routes. The report identifies
+the source and cohort used for each result; this table describes supported uses.
+
 | Dataset | Use | Split |
 |---|---|---|
-| HaluEval QA | Answer-level detection | dev/test |
+| HaluEval QA | Answer candidates, reviewed claim verification and repair | dev/test |
 | FELM world-knowledge | Segment-level detection | test only |
 | WikiBio GPT-3 | Sentence-level detection | test only |
 | Factcheck-Bench | Claim-level detection + repair gold | test only |
@@ -281,6 +342,17 @@ All settings live in [`configs/default.yaml`](configs/default.yaml). Key knobs:
 - [Factcheck-GPT / Factcheck-Bench](https://arxiv.org/abs/2311.09000) · [FAVA](https://arxiv.org/abs/2401.06855)
 - [HaluEval](https://arxiv.org/abs/2305.11747) · [FELM](https://arxiv.org/abs/2310.00741)
 - [FEVER](https://fever.ai) · [TruthfulQA](https://arxiv.org/abs/2109.07958)
+
+## Report and retained figures
+
+Read the [project report](docs/report/project_report.pdf) or follow the
+[LaTeX/Overleaf instructions](docs/report/README.md) to rebuild it. The report uses
+four team-supplied chart assets in `results/figures/`: baseline comparison,
+retrieval recall/latency, verification convergence, and the HaluEval B0 control.
+The synthetic calibration heatmap and illustrative training curves were removed.
+`python scripts/plot_results.py` regenerates the four retained charts from the
+team-supplied aggregate values embedded in the script. It does not execute the
+experiments or recompute metrics from raw predictions.
 
 ## Reproducible evaluation preparation
 
@@ -314,14 +386,15 @@ Holm-adjusted paired comparisons run without provider credentials or new inferen
 saved executions and independent assessments for offline recomputation. Use
 `scripts/build_evaluation_report.py` to build a new bundle and
 `scripts/audit_baseline.py --bundle ... --gold ...` to verify it. Final repair
-reports require complete adjudicated reviews; progress reports show coverage
-without final performance claims. Historical tables remain unverified.
+reports require complete adjudicated reviews; progress reports show coverage.
+The report attributes team-supplied aggregate charts separately from locally
+recomputed task bundles.
 
 [Real HaluEval preparation](docs/gold_annotation_workflow.md#pinned-halueval-source-preparation) produced a
 50-development/100-test candidate cohort. Five development records have reviewed
-gold, completed live executions and adjudicated repair assessments. The remaining
-annotations and full benchmark are unfinished. See the
-[handoff](docs/project_handoff.md) for exact measured-artifact locations.
+gold, completed live executions and adjudicated repair assessments. The later
+team-reported broader benchmark is summarized above; its private Drive artifacts are separate from these pilot files. See the
+[pilot handoff](docs/project_handoff.md) for exact pilot-artifact locations.
 
 For the reviewed five-record pilot, follow [the Colab instructions](docs/colab_followup_v4b.md)
 and open `notebooks/05_run_reviewed_pilot_colab.ipynb`. Reviewed evidence passages
