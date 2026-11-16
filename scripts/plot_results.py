@@ -3,17 +3,14 @@
 Comprehensive Result Visualization Suite
 Detecting and Repairing Hallucinations in LLM-Generated Answers
 
-Generates publication-quality figures:
+Generates the four retained report charts (original asset numbers preserved):
 1. Master Baseline Comparison (SCR before/after + Preservation vs Over-edit)
-2. Verifier 2D Threshold Calibration Heatmap (tau_s vs tau_c -> Macro-F1)
 3. Retrieval Architecture Performance & Latency Trade-off
 4. Re-Verification Loop Convergence & Error Reduction Dynamics
-5. Model Training Loss & Validation Metrics Progression (Loss Curves)
 6. Audited HaluEval Gold Benchmark & Baseline Distribution
 """
 
 import os
-import sys
 from pathlib import Path
 
 # Ensure writable matplotlib cache
@@ -21,7 +18,6 @@ os.environ["MPLCONFIGDIR"] = "/tmp/mpl_cache"
 os.makedirs("/tmp/mpl_cache", exist_ok=True)
 
 import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
 import numpy as np
 import seaborn as sns
 
@@ -39,6 +35,8 @@ plt.rcParams.update({
     "figure.dpi": 300,
 })
 
+# Values reproduce the team-supplied chart summaries. See
+# docs/report/figure_provenance.md for their source history.
 OUTPUT_DIR = Path("results/figures")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -112,70 +110,6 @@ def plot_master_baseline_comparison():
 
     plt.tight_layout()
     out_file = OUTPUT_DIR / "fig1_master_baseline_comparison.png"
-    plt.savefig(out_file, bbox_inches="tight")
-    plt.close()
-    print(f"Saved: {out_file}")
-
-
-def plot_verifier_threshold_heatmap():
-    """Figure 2: Verifier Threshold Calibration Heatmap (tau_s vs tau_c)"""
-    print("Generating Figure 2: Verifier Threshold Calibration Heatmap...")
-    
-    tau_s = np.linspace(0.50, 0.90, 9)  # 0.50 to 0.90 (step 0.05)
-    tau_c = np.linspace(0.30, 0.80, 11) # 0.30 to 0.80 (step 0.05)
-    
-    # Generate realistic calibrated Macro-F1 grid peaking at tau_s=0.50, tau_c=0.35
-    grid = np.zeros((len(tau_c), len(tau_s)))
-    for i, tc in enumerate(tau_c):
-        for j, ts in enumerate(tau_s):
-            # Distance from optimum (ts=0.50, tc=0.35)
-            dist = np.sqrt(1.5 * (ts - 0.50)**2 + 2.0 * (tc - 0.35)**2)
-            noise = 0.003 * np.sin(10 * ts) * np.cos(10 * tc)
-            val = 0.917 - 0.28 * dist + noise
-            grid[i, j] = max(0.68, min(0.917, val))
-            
-    # Set exact optimal point
-    opt_i = np.where(np.isclose(tau_c, 0.35))[0][0]
-    opt_j = np.where(np.isclose(tau_s, 0.50))[0][0]
-    grid[opt_i, opt_j] = 0.917
-
-    fig, ax = plt.subplots(figsize=(8.5, 6.5))
-    
-    # Plot heatmap
-    heatmap = sns.heatmap(
-        grid,
-        xticklabels=[f"{x:.2f}" for x in tau_s],
-        yticklabels=[f"{y:.2f}" for y in tau_c],
-        cmap="YlGnBu",
-        annot=True,
-        fmt=".3f",
-        annot_kws={"size": 8.5},
-        cbar_kws={"label": "3-Way Macro-F1 Score"},
-        ax=ax,
-    )
-    
-    ax.invert_yaxis()  # increasing tau_c upward
-    ax.set_xlabel("Supported Entailment Threshold ($\\tau_s$)")
-    ax.set_ylabel("Contradiction Threshold ($\\tau_c$)")
-    ax.set_title("Verifier Decision Boundary 2D Grid Search Calibration", pad=14, fontweight="bold")
-    
-    # Highlight optimal point with red star and rectangle
-    rect = plt.Rectangle((opt_j, opt_i), 1, 1, fill=False, edgecolor="#e74c3c", linewidth=2.5)
-    ax.add_patch(rect)
-    ax.plot(opt_j + 0.5, opt_i + 0.5, marker="*", markersize=14, color="#e74c3c")
-    
-    ax.annotate(
-        "Optimal Calibration Point\n($\\tau_s=0.50, \\tau_c=0.35$)\nMacro-F1 = 0.917",
-        xy=(opt_j + 1.05, opt_i + 0.5),
-        xytext=(opt_j + 1.8, opt_i + 1.8),
-        arrowprops=dict(facecolor="#e74c3c", shrink=0.08, width=1.5, headwidth=6),
-        fontsize=9.5,
-        fontweight="bold",
-        bbox=dict(boxstyle="round,pad=0.4", fc="#fff5f5", ec="#e74c3c", lw=1.2),
-    )
-    
-    plt.tight_layout()
-    out_file = OUTPUT_DIR / "fig2_verifier_threshold_heatmap.png"
     plt.savefig(out_file, bbox_inches="tight")
     plt.close()
     print(f"Saved: {out_file}")
@@ -312,80 +246,6 @@ def plot_reverification_convergence():
     print(f"Saved: {out_file}")
 
 
-def plot_training_loss_curves():
-    """Figure 5: Model Training Loss Curves & Validation Metrics Progression"""
-    print("Generating Figure 5: Training Loss Curves & Validation Metrics...")
-    
-    epochs = np.arange(1, 11)
-    
-    # Verifier Cross-Entropy Loss (simulated standard fine-tuning trajectory for DeBERTa-v3)
-    train_ce_loss = [1.08, 0.74, 0.52, 0.39, 0.29, 0.22, 0.17, 0.14, 0.12, 0.10]
-    val_ce_loss =   [1.12, 0.78, 0.58, 0.46, 0.38, 0.34, 0.32, 0.31, 0.32, 0.34]
-    val_macro_f1 =  [0.62, 0.73, 0.81, 0.85, 0.88, 0.90, 0.912, 0.917, 0.916, 0.915]
-    
-    # Repair Seq2Seq Generation Loss & Token ROUGE-L progression
-    train_repair_loss = [2.45, 1.82, 1.35, 1.02, 0.81, 0.65, 0.53, 0.44, 0.38, 0.33]
-    val_repair_loss =   [2.50, 1.90, 1.48, 1.20, 1.03, 0.92, 0.86, 0.83, 0.82, 0.83]
-    val_rouge_f1 =     [0.55, 0.68, 0.76, 0.82, 0.86, 0.89, 0.905, 0.912, 0.911, 0.910]
-    
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5.5))
-    
-    # Left: Verifier Loss & Macro-F1
-    color_loss = "#2980b9"
-    ax1.plot(epochs, train_ce_loss, "o-", color=color_loss, label="Training CE Loss", linewidth=2.0)
-    ax1.plot(epochs, val_ce_loss, "s--", color="#3498db", label="Validation CE Loss", linewidth=2.0)
-    ax1.set_xlabel("Training Epochs")
-    ax1.set_ylabel("Cross-Entropy Loss", color=color_loss, fontweight="bold")
-    ax1.tick_params(axis="y", labelcolor=color_loss)
-    ax1.set_ylim(0, 1.3)
-    ax1.set_xticks(epochs)
-    
-    ax1_twin = ax1.twinx()
-    color_f1 = "#27ae60"
-    ax1_twin.plot(epochs, val_macro_f1, "^-", color=color_f1, label="Val Macro-F1", linewidth=2.2)
-    ax1_twin.set_ylabel("Validation Macro-F1 Score", color=color_f1, fontweight="bold")
-    ax1_twin.tick_params(axis="y", labelcolor=color_f1)
-    ax1_twin.set_ylim(0.5, 1.0)
-    ax1_twin.grid(False)
-    
-    # Highlight best epoch (epoch 8)
-    ax1.axvline(8, color="#e74c3c", linestyle=":", linewidth=1.8, label="Best Checkpoint (Ep 8: F1=0.917)")
-    ax1.set_title("(A) Verifier Fine-Tuning Loss & F1 Curve", pad=12, fontweight="bold")
-    
-    # Combined legend
-    lines1 = ax1.get_lines() + ax1_twin.get_lines()
-    ax1.legend(lines1, [l.get_label() for l in lines1], loc="center left", framealpha=0.9)
-    
-    # Right: Repair Model Seq2Seq Loss & ROUGE
-    ax2.plot(epochs, train_repair_loss, "o-", color="#8e44ad", label="Training Seq2Seq Loss", linewidth=2.0)
-    ax2.plot(epochs, val_repair_loss, "s--", color="#9b59b6", label="Validation Loss", linewidth=2.0)
-    ax2.set_xlabel("Training Epochs")
-    ax2.set_ylabel("Seq2Seq Generation Loss", color="#8e44ad", fontweight="bold")
-    ax2.tick_params(axis="y", labelcolor="#8e44ad")
-    ax2.set_ylim(0, 2.8)
-    ax2.set_xticks(epochs)
-    
-    ax2_twin = ax2.twinx()
-    color_rouge = "#d35400"
-    ax2_twin.plot(epochs, val_rouge_f1, "D-", color=color_rouge, label="Val ROUGE-L F1", linewidth=2.2)
-    ax2_twin.set_ylabel("Validation ROUGE-L F1", color=color_rouge, fontweight="bold")
-    ax2_twin.tick_params(axis="y", labelcolor=color_rouge)
-    ax2_twin.set_ylim(0.5, 1.0)
-    ax2_twin.grid(False)
-    
-    ax2.axvline(8, color="#e74c3c", linestyle=":", linewidth=1.8, label="Best Checkpoint (Ep 8: ROUGE=0.912)")
-    ax2.set_title("(B) Localized Repair Fine-Tuning Loss & ROUGE-L", pad=12, fontweight="bold")
-    
-    lines2 = ax2.get_lines() + ax2_twin.get_lines()
-    ax2.legend(lines2, [l.get_label() for l in lines2], loc="center left", framealpha=0.9)
-
-    plt.tight_layout()
-    out_file = OUTPUT_DIR / "fig5_training_loss_curves.png"
-    plt.savefig(out_file, bbox_inches="tight")
-    plt.close()
-    print(f"Saved: {out_file}")
-
-
 def plot_audited_benchmark_distribution():
     """Figure 6: Audited HaluEval Gold Benchmark & Baseline Outcomes"""
     print("Generating Figure 6: Audited Benchmark Gold Claims & Baseline Distribution...")
@@ -455,14 +315,12 @@ def main():
     print("=" * 60)
     
     plot_master_baseline_comparison()
-    plot_verifier_threshold_heatmap()
     plot_retrieval_curves()
     plot_reverification_convergence()
-    plot_training_loss_curves()
     plot_audited_benchmark_distribution()
     
     print("=" * 60)
-    print("All 6 figures successfully generated!")
+    print("All 4 retained figures successfully generated!")
     print("=" * 60)
 
 

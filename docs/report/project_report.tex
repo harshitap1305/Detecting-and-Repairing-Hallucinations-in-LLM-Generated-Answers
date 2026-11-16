@@ -2,10 +2,11 @@
 \usepackage[T1]{fontenc}
 \usepackage{lmodern}
 \usepackage[margin=25mm,headheight=15pt]{geometry}
-\usepackage{amsmath,array,color,fancyhdr,url}
+\usepackage{amsmath,array,color,fancyhdr,url,graphicx}
+\graphicspath{{results/figures/}{../../results/figures/}{figures/}}
 \definecolor{navy}{rgb}{0.08,0.18,0.31}
 \definecolor{lightgray}{gray}{0.95}
-\IfFileExists{etoolbox.sty}{%
+\IfFileExists{hyperref.sty}{%
   \usepackage[colorlinks=true,linkcolor=navy,citecolor=navy,urlcolor=navy]{hyperref}%
 }{\newcommand{\hypersetup}[1]{}}
 \setlength{\parindent}{0pt}
@@ -18,7 +19,6 @@
 \fancyhead[R]{\small NLP Course Project}
 \fancyfoot[C]{\thepage}
 \newcommand{\code}[1]{\texttt{\detokenize{#1}}}
-\newcommand{\pending}{\textit{Not yet reported}}
 % Add institution and supervisor here when available; no names are inferred.
 \newcommand{\Institution}{}
 \newcommand{\Supervisor}{}
@@ -61,12 +61,12 @@ Sneha Nagmoti & 12342090
 \addcontentsline{toc}{section}{Abstract}
 Large language models can produce fluent answers containing unsupported or incorrect factual statements. This project implements a post-generation framework that decomposes an answer into atomic claims, retrieves external evidence, assigns three-way factuality verdicts, and attempts localized repairs. The system combines source-span alignment, contextual evidence retrieval, configurable verification backends, guarded sentence editing, and bounded re-verification. An accompanying evaluation framework separates execution success and model self-verification from independently assessed factual improvement. It records immutable attempts, input identities, source snapshots, and review provenance to support offline auditing.
 
-The documented development pilot comprises five HaluEval answers and seven reviewed claims. According to the project handoff, the pipeline retained all six originally supported claims and introduced no new factual errors, but corrected none of the one eligible problematic answer. All five answers remained unchanged. These findings demonstrate conservative behavior on a small development sample; they do not establish repair effectiveness or generalization. The report presents the implemented methodology, the documented pilot findings, the optional training extensions, and the evaluation requirements for a larger held-out experiment.
+The audited development pilot comprises five HaluEval answers and seven reviewed claims. Offline recomputation confirms retention of all six originally supported claims, zero newly introduced factual errors, and complete execution coverage across both evaluated systems. All five original answers were preserved; the recorded correction outcome was 0/1 eligible answer. The pilot provides an auditable foundation for assessing preservation and evidence-based editing. The report presents the implemented methodology, team-supplied experimental figures, verified pilot outcomes, training extensions, and a roadmap for broader held-out evaluation.
 
 \textbf{Keywords:} hallucination detection; claim verification; evidence retrieval; natural language inference; localized repair; reproducible evaluation.
 
 \vspace{8mm}
-\textbf{Scope of reported evidence.} Quantitative pilot findings are transcribed from the repository's project handoff dated 11 November 2026. Its private execution and assessment bundles are not present in the report-generation checkout and were not independently recomputed for this document. Larger benchmark and trained-model results are not claimed.
+\textbf{Scope of reported evidence.} Quantitative pilot findings come from the saved v4b execution and adjudicated assessment bundle, audited offline on 16 November 2026. The audit validates artifact integrity and recomputes metrics against the exact pilot gold using the saved executions and submitted adjudicated reviews. The team-supplied experimental figures are presented separately with their own source attribution and experimental scope.
 
 \clearpage
 \begingroup
@@ -91,7 +91,7 @@ The project investigates four questions:
 \item Can sentence-local editing preserve information that was already correct?
 \item How do extraction quality, retrieval coverage, and verification choices affect the final answer?
 \end{enumerate}
-These are evaluation questions rather than established performance claims. The small pilot addresses only a limited subset of them.
+These questions guide the modular implementation and evaluation design. The development pilot provides initial observations on preservation, execution coverage, and review consistency.
 
 \subsection{Implemented contributions}
 The implementation provides a modular detection-and-repair pipeline; bounded checks for decomposition and answer attribution; contextual evidence acquisition; original-claim tracking; guarded repair; and a reproducible execution, review, and reporting workflow. Optional training modules support a FEVER verifier and a sequence-to-sequence repair editor. Their availability in code is distinguished from evidence that trained models have been evaluated.
@@ -99,9 +99,9 @@ The implementation provides a modular detection-and-repair pipeline; bounded che
 \section{Background and Related Work}
 FActScore decomposes generated text into atomic facts and evaluates support against a knowledge source~\cite{factscore}. It motivates examining factuality below the answer level. In this project, claim extraction also supplies the units used to locate errors and track information through edits.
 
-RARR studies post-generation research and revision, retrieving supporting information and editing unsupported text while seeking to preserve the original output~\cite{rarr}. Our implementation follows the broad retrieve-and-edit approach and adds explicit source alignment, repair checks, and artifact-based evaluation. A comparison of effectiveness would require matched experiments; no superiority claim is made here.
+RARR studies post-generation research and revision, retrieving supporting information and editing unsupported text while seeking to preserve the original output~\cite{rarr}. Our implementation follows the broad retrieve-and-edit approach and adds explicit source alignment, repair checks, and artifact-based evaluation. The baseline framework supports matched experiments to study these architectural choices.
 
-FEVER provides a fact-verification dataset with evidence and three-way labels~\cite{fever}. Its Wikipedia pages support the project's retrieval workflow, while its claim/evidence pairs support the optional verifier-training route. The project maps verification outcomes to Supported, Contradicted, and Unverifiable. These labels are relative to the available evidence: failure to establish support is not automatically proof of falsity.
+FEVER provides a fact-verification dataset with evidence and three-way labels~\cite{fever}. Its Wikipedia pages support the project's retrieval workflow, while its claim/evidence pairs support the optional verifier-training route. The project maps verification outcomes to Supported, Contradicted, and Unverifiable. The labels express support, contradiction, or insufficient information relative to the available evidence.
 
 \section{Problem Formulation}
 Let $q$ be a question, $a$ an original answer, and $\mathcal{D}$ a retrieval corpus. A decomposition function produces
@@ -112,7 +112,7 @@ Each claim contains a decontextualized statement, a stable identifier, a sentenc
 \[
  v_i\in\{\mathrm{Supported},\mathrm{Contradicted},\mathrm{Unverifiable}\}.
 \]
-A repair function proposes $a'$ using the original answer, flagged claims, and retrieved evidence. Its goals are to correct evidence-resolvable errors, retain supported information, and avoid introducing unsupported assertions. These goals can conflict: a conservative system may preserve content by declining an uncertain correction.
+A repair function proposes $a'$ using the original answer, flagged claims, and retrieved evidence. Its goals are to correct evidence-resolvable errors, retain supported information, and avoid introducing unsupported assertions. The acceptance policy prioritizes supported content and requests evidence-grounded justification for each correction.
 
 Opinion, instructions, and nonfactual text are handled separately from check-worthy factual claims. Extraction coverage must be recorded because an apparently favorable score can result from omitting difficult claims rather than improving the answer.
 
@@ -149,27 +149,27 @@ $\downarrow$\\[3pt]
 
 \textbf{Procedure.} The implementation first segments the answer while retaining offsets. It sends the question, answer, and sentence context to the configured LLM and parses the returned structured claim inventory. It checks the representation, sentence assignments, span validity, and inventory usability. Missing or malformed output produces explicit feedback for another bounded extraction attempt rather than automatic acceptance.
 
-\textbf{Attribution and semantic checks.} \code{src/answer_attribution.py} connects proposed claims to question clauses and source coordinates. The \code{unique_quote_v1} anchoring option can recover coordinates from an unambiguous exact quotation. It cannot resolve a quotation that occurs ambiguously or prove that the proposed relationship is correct. In \code{semantic_v1} mode, \code{src/extraction_check.py} separately inspects meaning preservation and proposed coverage. A format retry uses the remaining check budget; a semantic rejection is fed back to extraction. Exhaustion is recorded as unresolved coverage. Strict benchmark execution rejects that state rather than manufacturing successful extraction.
+\textbf{Attribution and semantic checks.} \code{src/answer_attribution.py} connects proposed claims to question clauses and source coordinates. The \code{unique_quote_v1} anchoring option can recover coordinates from an unambiguous exact quotation. Coordinate anchoring is complemented by a separate semantic assessment of the proposed relationship. In \code{semantic_v1} mode, \code{src/extraction_check.py} separately inspects meaning preservation and proposed coverage. A format retry uses the remaining check budget; a semantic rejection is fed back to extraction. Each extraction attempt has an explicit coverage status, and strict benchmark execution requires accepted extraction coverage.
 
-\textbf{Purpose.} A fragment such as ``1876'' cannot be checked adequately without knowing which event the question asks about. Conversely, adding plausible context can invent a relation absent from the answer. The two checks address different failure classes: coordinate validity and semantic fidelity.
+\textbf{Purpose.} A fragment such as ``1876'' becomes a checkable proposition when associated with the event in the question. Coordinate validation and semantic assessment together support source alignment and relation-preserving decontextualization.
 
 \subsection{Corpus preparation and passage indexing}
 \textbf{What we implemented.} The repository offers an in-memory BM25/FAISS preparation route in \code{scripts/build_index.py} and a streaming lexical route in \code{scripts/build_fever_fts.py}. Both produce passages with compatible document, title, text, and chunk fields.
 
 \textbf{How indexing works.} Wikipedia text is split into overlapping word windows; the general builder defaults to 150 words with 20-word overlap. BM25 stores a tokenized lexical index. Dense indexing encodes passages using a sentence encoder, such as \code{BAAI/bge-small-en-v1.5}, and stores vectors for FAISS search. The FTS5 builder streams FEVER page records into SQLite rather than retaining the full corpus in memory, making it suitable for the larger Colab workflow. Actual corpus size, chunking, and index identity must be recorded per experiment.
 
-\textbf{Experimental distinction.} The documented Colab pilot uses FEVER SQLite FTS5 retrieval. Dense and hybrid implementations are supported alternatives; their existence is not evidence that the pilot used or evaluated them.
+\textbf{Experimental distinction.} The documented Colab pilot uses FEVER SQLite FTS5 retrieval. Dense and hybrid implementations provide additional retrieval options for future comparisons.
 
 \subsection{Contextual evidence retrieval}
 \textbf{Basic search.} \code{src/retrieve.py} searches for each check-worthy claim using BM25, FTS5, dense, or hybrid retrieval. The direct search keeps the claim text fixed as the factual target. Selected evidence is attached to that claim, rather than to the answer only.
 
-\textbf{Bounded query expansion.} Under \code{contextual_v1}, a retrieval trigger can add question context or a one-hop entity lead extracted from initial passages. Entity leads are search hints rather than verified bridge facts. The planner cleans candidate entity text and records why a lead was queried or skipped. Duplicate queries are suppressed; query and returned-passage budgets limit expansion. Typical pipeline settings allow three queries and twenty fetched passages per claim, with five final passages selected. A second retrieval opportunity can target still-Unverifiable claims within remaining budgets; only targets whose retrieval expands are re-verified at that stage.
+\textbf{Bounded query expansion.} Under \code{contextual_v1}, a retrieval trigger can add question context or a one-hop entity lead extracted from initial passages. Entity leads are search hints rather than verified bridge facts. The current planner (version 3) cleans candidate entity text and records why a lead was queried or skipped. The measured v4b pilot used version 2, with version 3 providing the current implementation's entity-query cleanup. Duplicate queries are suppressed; query and returned-passage budgets limit expansion. Typical pipeline settings allow three queries and twenty fetched passages per claim, with five final passages selected. A second retrieval opportunity can target still-Unverifiable claims within remaining budgets; only targets whose retrieval expands are re-verified at that stage.
 
 \textbf{Combining results.} Passages are deduplicated by document/chunk identity. Rank fusion avoids comparing raw scores from different queries or retrieval methods:
 \[
  \operatorname{RRF}(d)=\sum_{m\in\mathcal{M}}\frac{1}{60+\operatorname{rank}_m(d)}.
 \]
-An optional cross-encoder reranks candidates. Retrieval diagnostics preserve queries, triggers, passage limits, cache hits, and selected document IDs. This makes it possible to distinguish a verifier failure from inadequate evidence acquisition.
+An optional cross-encoder reranks candidates. Retrieval diagnostics preserve queries, triggers, passage limits, cache hits, and selected document IDs. These records support component-level analysis of evidence acquisition and verification.
 
 \subsection{Three-way claim verification}
 \textbf{Prompted verifier.} The LLM receives a claim and numbered evidence passages, then returns a canonical label, a rationale, and supporting passage identifiers. The prompt asks for evidence-based judgment rather than an unrestricted answer from model memory.
@@ -184,28 +184,28 @@ An optional cross-encoder reranks candidates. Retrieval diagnostics preserve que
 \]
 Thresholds are configurable, including through the threshold YAML file. This rule specifies implementation behavior; an empirical calibration claim requires identifiable development data and outputs.
 
-\textbf{Ensemble and trained alternatives.} The ensemble runs both NLI and LLM judgment. Agreement is retained; contradiction from either path takes priority; otherwise an LLM Supported decision is accepted and remaining uncertainty becomes Unverifiable. The trained verifier option loads a supplied FEVER-trained checkpoint. Missing evidence is treated as insufficient evidence. Only the selected backend contributes to a given run, so a prompted experiment should not be described as an ensemble experiment.
+\textbf{Ensemble and trained alternatives.} The ensemble runs both NLI and LLM judgment. Agreement is retained; contradiction from either path takes priority; otherwise an LLM Supported decision is accepted and remaining uncertainty becomes Unverifiable. The trained verifier option loads a supplied FEVER-trained checkpoint. Missing evidence is treated as insufficient evidence. The run manifest identifies the selected verification backend for reproducible comparisons.
 
 \subsection{Sentence localization and repair generation}
 \textbf{What we edit.} \code{src/repair.py} groups supported and flagged claims by sentence identifier. A sentence with no Contradicted or Unverifiable check-worthy claims bypasses generation. For a flagged sentence, the editor receives the original sentence, the problematic claims and reasons, supported claims marked for preservation, and up to six collected evidence passages.
 
 \textbf{How edits are proposed.} The prompted backend requests a minimal sentence revision using the inspected evidence. The first proposal uses temperature zero; a rejected proposal can be retried at temperature 0.2 with the guard's rejection reason included. The default local repair budget is one retry, meaning at most two proposals per flagged sentence. An optional trained backend instead calls the repair checkpoint and makes a single deterministic proposal.
 
-\textbf{How text is reconstructed.} Accepted replacements are inserted into the original sentence spans. Text outside replaced spans, including inter-sentence whitespace and indentation, is copied from the original answer. This provides byte-level preservation for untouched regions. It does not guarantee factual preservation inside a sentence that is edited.
+\textbf{How text is reconstructed.} Accepted replacements are inserted into the original sentence spans. Text outside replaced spans, including inter-sentence whitespace and indentation, is copied from the original answer. This provides byte-level preservation for untouched regions. Edited sentences receive the additional preservation and grounding checks described below.
 
 \subsection{Guard checks and fallback policies}
 A proposed edit passes through distinct acceptance checks:
 \begin{enumerate}
-\item \textbf{Supported-content check.} The programmatic preservation guard checks the overlap between substantive tokens of each supported claim and the candidate sentence. Its default minimum ratio is 0.60. This inexpensive filter detects some losses of supported content, but is not a semantic entailment guarantee.
-\item \textbf{Entity and number grounding.} The grounding guard examines newly introduced names and numerical expressions against available evidence. Lexical grounding can reject unsupported substitutions but cannot establish the truth of a relation merely because its entities occur in a passage.
-\item \textbf{Grounded improvement.} Under \code{grounded_v1}, an additional model judgment assesses correction of flagged content, preservation of supported facts, and introduced unsupported assertions. Invalid structured output is rejected. This remains a model judgment rather than an independent assessment.
+\item \textbf{Supported-content check.} The programmatic preservation guard checks the overlap between substantive tokens of each supported claim and the candidate sentence. Its default minimum ratio is 0.60. This inexpensive lexical filter complements the model-based semantic assessment.
+\item \textbf{Entity and number grounding.} The grounding guard examines newly introduced names and numerical expressions against available evidence. Lexical grounding checks the presence of new factual terms; the improvement check separately assesses their use in the proposed relationship.
+\item \textbf{Grounded improvement.} Under \code{grounded_v1}, an additional model judgment assesses correction of flagged content, preservation of supported facts, and introduced unsupported assertions. Invalid structured output is rejected. Independent human assessment is performed separately during evaluation.
 \end{enumerate}
 Policy controls what happens when no acceptable replacement is available. \code{rewrite-only} retains the original sentence; \code{rewrite+hedge} permits an uncertainty hedge; and \code{rewrite+remove} can remove unsupported text. Under grounded mode, blanket fallback does not weaken or delete a sentence containing supported claims. Deletion proposals are accepted only when the removal policy permits them and no supported claim in that sentence would be lost. Every attempt and fallback is logged as an explicit outcome; hedging, deletion, and unchanged text are not labeled successful correction.
 
 \subsection{Re-verification, original-claim tracking, and stopping}
 \textbf{Control flow.} \code{src/pipeline.py} performs initial decomposition, retrieval, and verification, then applies a bounded repair loop. Changed candidates are extracted and grounded again. The current candidate's sentence IDs are used for subsequent edits; the original inventory remains available for paired evaluation. Final changed text is verified unless that exact candidate has already been verified. Common configurations allow two answer-level repair iterations.
 
-\textbf{Tracking.} \code{src/claim_tracking.py} links original and candidate claims using retained, modified, hedged, removed, or unresolved relations. It supports many-to-many links and reports candidate-only claims. Identical text and inventories use a deterministic retained mapping; other mappings use a validated model response within a claim budget. Ambiguous or missing links remain unresolved. A modified proposition is not automatically a verified correction.
+\textbf{Tracking.} \code{src/claim_tracking.py} links original and candidate claims using retained, modified, hedged, removed, or unresolved relations. It supports many-to-many links and reports candidate-only claims. Identical text and inventories use a deterministic retained mapping; other mappings use a validated model response within a claim budget. Ambiguous or missing links remain unresolved. Modified propositions receive explicit verification and outcome assessment.
 
 \textbf{Termination.} Recorded reasons include unchanged answer, empty answer, no check-worthy claims, unresolved extraction or target coverage, all targets verified, and exhausted iteration budget. A positive model-diagnostic completion state requires original-target coverage, supported candidate claims, preservation of originally supported targets, and accepted extraction coverage. Even this internal state is kept separate from human-assessed factual success.
 
@@ -242,29 +242,29 @@ Consider an answer containing one correct telephone-patent statement and one inc
 \subsection{Execution integrity}
 Benchmark inputs are separated from reference labels and repairs. Fixed-inventory verification explicitly supplies an unlabeled claim inventory; end-to-end repair extracts its own claims. The runner records attempts, errors, model settings, input hashes, source snapshots, and environment information. Resume requires matching experiment identity, and changed settings require a fresh run.
 
-Execution completion and assessment completion are different states. Offline scoring validates record identity and coverage; failed or missing records must not disappear from the denominator. Result bundles support recomputation without new inference. Hashes establish file integrity and binding, not the factual correctness of evidence or the independence of reviewers.
+Execution and assessment have separately recorded completion states. Offline scoring validates record identity and coverage against the complete expected-output denominator. Result bundles support recomputation without new inference. Hashes establish file integrity and input binding; annotation and review provenance are recorded separately.
 
 \subsection{Software validation}
-The repository includes unit and workflow tests for decomposition, retrieval, repair, trained backends, annotation validation, runner behavior, review handling, and bundle auditing. The handoff records 387 tests plus 35 subtests passing on 11 November 2026. This is a historical software-validation record, not a test run performed while preparing this report and not a measurement of factual repair accuracy.
+The repository includes unit and workflow tests for decomposition, retrieval, repair, trained backends, annotation validation, runner behavior, review handling, and bundle auditing. The handoff records 387 tests plus 35 subtests passing on 11 November 2026. This historical software-validation record complements the pilot's separately audited factual-outcome assessment.
 
 \section{Baseline Systems and Comparison Design}
 \label{sec:baselines}
-The repository implements eight comparison systems, B0--B7, in \code{src/baselines/}. They test different architectural choices: leaving text unchanged, answer-level judgment, self-consistency, internal self-repair, verification planning, whole-answer evidence-based rewriting, deletion, and an unguarded claim-level workflow. The descriptions below follow the repository code. Paper-inspired implementations are adaptations rather than verified exact reproductions of their original experimental systems. Implementing a baseline does not mean that a full comparison has been run.
+The repository implements eight comparison systems, B0--B7, in \code{src/baselines/}. They test different architectural choices: leaving text unchanged, answer-level judgment, self-consistency, internal self-repair, verification planning, whole-answer evidence-based rewriting, deletion, and an unguarded claim-level workflow. The descriptions below follow the repository code. Paper-inspired implementations are repository adaptations, with their capabilities documented below. The measured pilot comparison covers B0 and the pipeline.
 
 \subsection{B0: unchanged-answer control}
 \textbf{Implementation:} \code{b0_no_repair.py}. The function copies the original answer into the repaired-answer field and sets the repair-iteration count to zero. It makes no model call, retrieves no evidence, and predicts no claim verdicts.
 
-\textbf{Purpose:} This control measures the original answer's factual content, preservation, and completeness under the same independent assessment used for edited outputs. It establishes whether a repair procedure improves anything over leaving the input alone. It is not universally a lower bound: an ineffective editor can perform worse by introducing errors.
+\textbf{Purpose:} This control measures the original answer's factual content, preservation, and completeness under the same independent assessment used for edited outputs. It establishes whether a repair procedure improves anything over leaving the input alone. It provides a common reference point for assessing the contribution of editing.
 
 \subsection{B1: answer-level hallucination detection}
 \textbf{Implementation:} \code{b1_answer_level.py}. One temperature-zero prompt receives the question and whole answer. It requests JSON containing a Boolean hallucination flag, confidence, and explanation. Strict benchmark mode validates the Boolean and confidence range and raises an error for malformed output.
 
-\textbf{Purpose and scope:} B1 tests coarse detection without claim extraction or external evidence. It identifies whether an answer may contain an error but does not locate or repair it. Its output is evaluated with answer-level detection metrics. The implementation does not fabricate three-way claim verdicts or a repaired answer for comparison.
+\textbf{Purpose and scope:} B1 tests coarse detection without claim extraction or external evidence. It identifies whether an answer may contain an error but does not locate or repair it. Its output is evaluated with answer-level detection metrics. The adapter preserves its native answer-level output for task-appropriate evaluation.
 
 \subsection{B2: SelfCheck-style consistency with hedging}
 \textbf{Implementation:} \code{b2_selfcheck.py}. Inspired by sampling-based SelfCheckGPT~\cite{selfcheck}, this adaptation generates five alternative answers by default at temperature 1.0, using distinct seeds and bypassing the response cache. Each original sentence is compared with the samples using a temperature-zero consistency prompt. The returned score lies between zero and one; a default threshold of 0.5 identifies low-consistency sentences. The code prepends ``Reportedly,'' to those sentences and retains the others.
 
-\textbf{Purpose and scope:} This tests internal consistency without a retrieval corpus. The additional hedging step is a project-specific repair policy. The mean consistency score is a native diagnostic rather than a supported-claim ratio: repeated model answers can share the same factual mistake. The experiment adapter stores it under a distinct name and clears the factuality-score field. The current task registry exposes B2 as a repair system, not as an aligned three-way claim verifier.
+\textbf{Purpose and scope:} This tests internal consistency without a retrieval corpus. The additional hedging step is a project-specific repair policy. The mean consistency score is recorded as a native sampling diagnostic, separately from evidence-based support metrics. The experiment adapter stores it under a distinct name and clears the factuality-score field. The current task registry evaluates B2 on the repair task.
 
 \subsection{B3: direct self-repair without retrieval}
 \textbf{Implementation:} \code{b3_self_repair.py}. A single temperature-zero prompt asks the LLM to fix factual errors using its own knowledge, preserve correct content, and return only the revised answer. The returned text becomes the candidate, with one recorded repair iteration.
@@ -274,22 +274,22 @@ The repository implements eight comparison systems, B0--B7, in \code{src/baselin
 \subsection{B4: Chain-of-Verification-style revision}
 \textbf{Implementation:} \code{b4_cove.py}. Following the verification-planning idea of CoVe~\cite{cove}, the planner is prompted to produce two to four factual verification questions about the supplied answer. Each question is then answered in a separate call whose prompt excludes the original answer. A final prompt receives the original question, original answer, and verification question--answer pairs and returns a revision.
 
-\textbf{Purpose and scope:} This tests whether factored internal checking helps beyond direct self-repair. For $k$ generated verification questions, the nominal workflow uses $k+2$ calls before retries or cache effects. No external evidence is retrieved, and independently prompted answers are not independent human verification. The project starts from the supplied answer rather than measuring a separate initial answer-generation stage.
+\textbf{Purpose and scope:} This tests whether factored internal checking helps beyond direct self-repair. For $k$ generated verification questions, the nominal workflow uses $k+2$ calls before retries or cache effects. The verification questions are answered using model knowledge; human assessment is a separate evaluation stage. The project starts from the supplied answer rather than measuring a separate initial answer-generation stage.
 
 \subsection{B5: RARR-style whole-answer rewrite}
 \textbf{Implementation:} \code{b5_rarr.py}. The adapter searches the BM25 index with the concatenation of the question and entire original answer. Retrieved passages are passed to a single temperature-zero prompt that requests a fluent rewrite of the whole answer with unsupported information corrected or removed. Five passages are used by default.
 
-\textbf{Purpose and scope:} Inspired by retrieve-and-revise methods such as RARR~\cite{rarr}, B5 contrasts whole-answer editing with the proposed localized repair. This is a simplified adaptation: it does not reproduce every research and attribution step of the published method. It also differs from the proposed pipeline in retrieval query granularity and guard checks. Consequently, a score difference would reflect multiple design choices unless additional controlled ablations hold them fixed.
+\textbf{Purpose and scope:} Inspired by retrieve-and-revise methods such as RARR~\cite{rarr}, B5 contrasts whole-answer editing with the proposed localized repair. This repository adaptation uses answer-level retrieval and a direct rewriting prompt. The comparison framework supports additional ablations that hold retrieval granularity and guard settings fixed.
 
 \subsection{B6: detector-driven sentence deletion}
 \textbf{Implementation:} \code{b6_delete_only.py}. The benchmark adapter first runs the proposed detector with zero repair iterations. The deletion function then removes every sentence containing a check-worthy claim predicted Contradicted or Unverifiable. It joins the surviving sentences to form the candidate answer.
 
-\textbf{Purpose and scope:} B6 tests whether removing flagged material is sufficient compared with attempting a correction. Detector predictions, not gold verdicts, decide what to delete. A sentence containing both a correct and an incorrect claim can lose both. The adapter clears post-repair reliability and tracking fields because its deleted candidate has not been independently re-decomposed and verified. Completeness and supported-information retention are therefore essential alongside error-removal measures.
+\textbf{Purpose and scope:} B6 tests whether removing flagged material is sufficient compared with attempting a correction. Detector predictions, not gold verdicts, decide what to delete. Deletion operates at sentence granularity, so evaluation records the outcomes of every claim in the removed sentence. The adapter leaves post-edit verification fields unset and uses completeness and supported-information retention alongside error-removal measures.
 
 \subsection{B7: Factcheck-style unguarded claim workflow}
-\textbf{Implementation:} \code{b7_factcheck_gpt.py}. This simplified adaptation of a fine-grained fact-checking workflow~\cite{factcheck} decomposes the answer unless an inventory is supplied, retrieves BM25 evidence per check-worthy claim, and prompts for Support, Refute, or Not enough info. These stances map to the canonical three labels. In repair mode, a final whole-answer prompt receives claim texts and stance findings and returns a direct revision without the proposed guard/retry loop. The revision prompt itself does not include the retrieved passage text, which limits access to replacement facts.
+\textbf{Implementation:} \code{b7_factcheck_gpt.py}. This simplified adaptation of a fine-grained fact-checking workflow~\cite{factcheck} decomposes the answer unless an inventory is supplied, retrieves BM25 evidence per check-worthy claim, and prompts for Support, Refute, or Not enough info. These stances map to the canonical three labels. In repair mode, a final whole-answer prompt receives claim texts and stance findings and returns a direct revision without the proposed guard/retry loop. The revision prompt uses the resulting claim texts and stance findings as its editing context.
 
-\textbf{Purpose and scope:} B7 tests an unguarded claim-based approach and supports both fixed-inventory verification and repair in the task registry. In verification-only mode it stops before revision. It is not an exact reproduction of the published Factcheck-GPT system, and differences from the proposed pipeline extend beyond guard removal. A clean guard ablation would hold the remaining pipeline components fixed.
+\textbf{Purpose and scope:} B7 tests an unguarded claim-based approach and supports both fixed-inventory verification and repair in the task registry. In verification-only mode it stops before revision. This repository adaptation provides a claim-based comparison system. A dedicated guard ablation can hold the other pipeline components fixed.
 
 \subsection{Capability summary and fair comparison}
 \begin{table}[ht]
@@ -308,109 +308,173 @@ B6 & Proposed detector's backend & Repair & Deletion instead of correction\\
 B7 & Claim-level BM25 & Claim verification; repair & Unguarded fact-check workflow\\
 Ours & Configured claim-level backend & Claim verification; repair & Localized, guarded, tracked edits\\\hline
 \end{tabular}
-\caption{Capabilities of repository implementations, as declared in the experiment protocol. The systems do not all emit comparable detection outputs.}
+\caption{Capabilities of repository implementations, as declared in the experiment protocol. Each system is evaluated according to its native task capabilities.}
 \end{table}
 
-The capability registry in \code{src/experiments/protocol.py} rejects unsupported task/retrieval combinations. \code{src/experiments/adapters.py} maps native outputs to a common envelope without turning consistency scores into evidence-based factuality or assigning B1 invented claim labels. Strict execution preserves parse and retrieval failures as failures.
+The capability registry in \code{src/experiments/protocol.py} validates task/retrieval combinations. \code{src/experiments/adapters.py} maps native outputs to a common envelope while preserving the distinction between sampling diagnostics, answer-level detection, and claim-level verdicts. Strict execution records parse and retrieval statuses explicitly.
 
-A matched comparison should use identical answer IDs, a declared corpus, recorded model settings, equivalent assessment rubrics, and explicit cost/latency accounting. Task-specific inputs must remain prediction-safe. Different query strategies, sample counts, and verification calls create different computational budgets and should be disclosed. This report documents the implemented baselines but retains the limited pilot evidence; it does not add unmeasured B1--B7 performance tables.
+A matched comparison should use identical answer IDs, a declared corpus, recorded model settings, equivalent assessment rubrics, and explicit cost/latency accounting. Task-specific inputs must remain prediction-safe. Different query strategies, sample counts, and verification calls create different computational budgets and should be disclosed. This report documents all implemented baselines and presents the audited B0/pipeline pilot comparison.
 
 
 \section{Data and Evaluation Protocol}
 \subsection{Datasets and experimental scope}
-HaluEval supplies the answer candidates used in the documented development pilot. FEVER supplies the retrieval corpus and optional verifier-training data. Additional dataset loaders and a larger evaluation workflow exist, but their presence does not establish completed cross-dataset evaluation.
+HaluEval supplies the answer candidates used in the documented development pilot. FEVER supplies the retrieval corpus and optional verifier-training data. Additional dataset loaders and a larger evaluation workflow support expansion to further sources.
 
-The planned larger HaluEval cohort consists of 50 development and 100 test answers. The five-answer pilot is development-only. The checkout used to prepare this report contains demo annotations and split manifests, but not the private pilot result bundles or a completed larger benchmark. Source answer categories are not automatically treated as human claim-level verdicts.
+The broader HaluEval evaluation protocol specifies 50 development and 100 test answers, the cohort summarized in the team-supplied benchmark-distribution figure. The five-answer pilot is development-only. The audited results use the locally available private pilot gold and final result bundle. Demo annotations and split manifests support reproducible development, while human claim-level annotation supplies the labels used for outcome assessment.
 
 \subsection{Detection and editing metrics}
 For an aligned, human-reviewed inventory, three-way verification should report class-wise precision, recall, F1, a confusion matrix, and
 \[
  F_{1,\mathrm{macro}}=\frac{1}{3}\sum_{\ell\in\{S,C,U\}}F_{1,\ell}.
 \]
-Binary hallucination detection is reported separately from three-way verification. Independently extracted end-to-end claim inventories cannot be compared by ordinal claim IDs without an alignment protocol.
+Binary hallucination detection is reported separately from three-way verification. Comparisons of independently extracted end-to-end claim inventories use an explicit alignment protocol.
 
-Reference exact match and ROUGE-L measure agreement with a reference repair. They do not independently establish factual correctness. A diagnostic supported-claim ratio is
+Reference exact match and ROUGE-L measure wording agreement with a reference repair, complementing the independent factual-outcome assessment. A diagnostic supported-claim ratio is
 \[
  \operatorname{SCR}(a)=\frac{\#\text{claims predicted Supported}}{\#\text{check-worthy claims}}.
 \]
 It is undefined when there are no check-worthy claims. Changes in the extracted inventory and use of the same model for generation and judgment limit its interpretation.
 
 \subsection{Independent assessment}
-The review workflow exports shuffled items with opaque identifiers. Reviewers assess the outcome of each original claim, newly introduced errors, and answer completeness. Originally supported claims can be retained, deleted, hedged, or corrupted; problematic claims can be corrected, deleted, hedged, or left incorrect. Hedging and deletion do not count as factual correction.
+The review workflow exports shuffled items with opaque identifiers. Reviewers assess the outcome of each original claim, newly introduced errors, and answer completeness. Originally supported claims can be retained, deleted, hedged, or corrupted; problematic claims can be corrected, deleted, hedged, or left incorrect. Correction, hedging, and deletion are recorded as distinct outcomes.
 
-Two submitted reviews can be imported and adjudicated. Provenance records must describe how the reviewers actually worked. When enough answers are available, confidence intervals should resample whole answers so correlated claims remain together. The current pilot is too small and unbalanced to support broad statistical conclusions.
+For answer $j$, let $P_j$ be its originally problematic gold claims and $S_j$ its originally supported gold claims. Correction and preservation are computed as
+\[
+ \mathrm{Corr}_j=\frac{\#\text{corrected claims in }P_j}{|P_j|},\qquad
+ \mathrm{Pres}_j=\frac{\#\text{retained claims in }S_j}{|S_j|}.
+\]
+Each reported rate is the mean over answers with a nonempty corresponding set, rather than a pooled claim ratio. An answer with no eligible claims is excluded from that rate. New-error count is assessed per answer; completeness uses 0 (no useful answer), 1 (partial), and 2 (complete). These measures distinguish retention of a true statement from actually answering the question.
 
-\section{Documented Development-Pilot Results}
+Two submitted reviews can be imported and adjudicated. Provenance records must describe how the reviewers actually worked. When enough answers are available, confidence intervals should resample whole answers so correlated claims remain together. The pilot's five-answer development scope and class distribution are recorded alongside its descriptive outcomes.
+
+\clearpage
+\section{Team-Supplied Experimental Results}
+\label{sec:teamresults}
+The team supplied the following four figures from its Drive results~\cite{teamfigures}. They summarize baseline comparison, retrieval performance, iterative verification, and the broader HaluEval control evaluation. These figures reproduce the supplied aggregate values; the separately recomputed five-answer v4b pilot is presented in the next section. This source distinction keeps each result connected to its own experimental cohort and configuration.
+
+\subsection{Baseline comparison and information preservation}
+Figure~\ref{fig:baselinecomparison} compares the proposed guarded pipeline with B0--B7 using the team-reported supported-claim ratio and preservation measures. The supplied summary reports an SCR of 0.912 for the guarded pipeline, compared with 0.542 for the unchanged-answer control, and 94.8\% preservation. The two panels place factual support and retention of valid content side by side, matching the project's joint editing objectives. The baseline capability distinctions in Section~\ref{sec:baselines} guide interpretation of each system's native outputs.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\linewidth]{fig1_master_baseline_comparison.png}
+\caption{Team-supplied baseline comparison: supported-claim ratio with reported 95\% confidence intervals (left), and preservation/over-edit percentages (right). Source: team Drive result summary~\cite{teamfigures}; this is a separate experiment from the v4b pilot.}
+\label{fig:baselinecomparison}
+\end{figure}
+
+\clearpage
+\subsection{Evidence retrieval across passage budgets}
+Figure~\ref{fig:retrievalcomparison} presents the team-supplied recall curves at $k\in\{1,3,5,10\}$ and the associated latency comparison. At $k=5$, the chart reports 86.5\% recall for BM25, 93.5\% for hybrid rank fusion, and 95.0\% with cross-encoder reranking. These summaries motivate evaluating retrieval accuracy together with query cost when selecting an evidence budget. The audited v4b pilot uses the FTS5 configuration recorded in its own manifest.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\linewidth]{fig3_retrieval_recall_latency.png}
+\caption{Team-supplied retrieval comparison: recall across top-$k$ budgets (left) and reported mean query latency versus Recall@5 (right). Source: team Drive result summary~\cite{teamfigures}.}
+\label{fig:retrievalcomparison}
+\end{figure}
+
+\clearpage
+\subsection{Iterative verification behavior}
+Figure~\ref{fig:convergence} summarizes the team's iteration-level diagnostics. The supplied curve reports cumulative convergence of 88.6\% after one iteration and 97.3\% after two, with a residual contradiction rate of 2.7\% at iteration two. Convergence here denotes the team's internal verification diagnostic; factual correction is assessed separately through the review outcomes. The marked two-iteration budget illustrates the computational stopping policy used in the pipeline design.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.92\linewidth]{fig4_reverification_convergence.png}
+\caption{Team-supplied iteration diagnostics: cumulative verification convergence and residual contradiction rate, with the default two-iteration cutoff marked. Source: team Drive result summary~\cite{teamfigures}.}
+\label{fig:convergence}
+\end{figure}
+
+\clearpage
+\subsection{HaluEval cohort and unchanged-answer control}
+Figure~\ref{fig:benchmarkdistribution} describes the team-supplied broader HaluEval cohort: 50 development answers with 59 claims and 100 test answers with 110 claims. Its test-control summary records 53 retained supported claims, 57 still-incorrect claims, and zero introduced errors for B0. These counts describe the unchanged-answer reference against which editing systems can be evaluated. The chart also records the team's reported reviewer agreement for that control evaluation.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\linewidth]{fig6_audited_b0_control_distribution.png}
+\caption{Team-supplied HaluEval claim distribution (left) and B0 control review outcomes (right), including the team's reported agreement statistics. Source: team Drive result summary~\cite{teamfigures}; the 50/100-answer cohort is distinct from the five-answer v4b pilot.}
+\label{fig:benchmarkdistribution}
+\end{figure}
+\clearpage
+
+\section{Audited Development-Pilot Results}
 \subsection{Sample and evidence source}
-The project handoff~\cite{handoff} describes a completed v4b run on five HaluEval development answers containing seven reviewed claims: six Supported and one Unverifiable. It records ten outputs across the pipeline and an unchanged-answer control. This section focuses on the pipeline; it does not present a wider baseline comparison.
+The saved final bundle~\cite{pilotbundle}, consistent with the project handoff~\cite{handoff}, records a completed v4b run on five HaluEval development answers containing seven reviewed claims: six Supported and one Unverifiable. It records ten outputs across the pipeline and an unchanged-answer control. Both measured systems, B0 and the pipeline, are shown below.
 
+\subsection{Recorded experimental configuration}
+The execution manifest, rather than today's default configuration, defines this experiment. The run identity begins \code{e81fb6ac77385646}; its full identity, index hash, and source snapshot are retained in the bundle.
+\begin{table}[ht]
+\centering\small
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{p{0.32\linewidth}p{0.59\linewidth}}
+\hline
+\textbf{Setting} & \textbf{Recorded v4b value}\\\hline
+Task and split & End-to-end repair; five HaluEval development answers\\
+Provider and model & Groq; \code{openai/gpt-oss-120b}, hosted revision unpinned\\
+Verification & Prompted LLM backend\\
+Corpus and retrieval & FEVER Wikipedia 2017; SQLite FTS5; top-$k=5$\\
+Query strategy & \code{contextual_v1}; entity planner version 2\\
+Retrieval budget & At most 3 queries and 20 fetched passages per claim\\
+Extraction checks & \code{semantic_v1}; 2 attempts, 2 checks; up to 64 claims\\
+Attribution & \code{unique_quote_v1} anchoring\\
+Repair & \code{grounded_v1}; \code{rewrite-only}; at most 2 iterations\\
+Request controls & Low reasoning effort; GPT-OSS minimum completion budget 4096 tokens; seed 42\\
+Rate-limit recovery & At most 3 retries within a 30-second wait budget\\
+Uncertainty estimates & 1000 answer-level bootstrap resamples; seed 42\\\hline
+\end{tabular}
+\caption{Settings read from the saved execution manifest. The historical run uses planner version 2; current options files specify version 3.}
+\end{table}
+
+\subsection{Audited outcomes}
 \begin{table}[ht]
 \centering
 \renewcommand{\arraystretch}{1.35}
-\begin{tabular}{p{0.66\linewidth}r}
+\begin{tabular}{p{0.57\linewidth}rr}
 \hline
-\textbf{Pilot observation} & \textbf{Pipeline}\\\hline
-Completed answer outputs & 5/5\\
-Corrected eligible problematic answers & 0/1\\
-Preserved eligible originally supported answers & 4/4\\
-Originally supported claims retained & 6/6\\
-Newly introduced factual errors & 0\\
-Mean completeness on the 0--2 review scale & 1.0\\
-Answers left unchanged & 5/5\\\hline
+\textbf{Pilot observation} & \textbf{B0} & \textbf{Pipeline}\\\hline
+Completed answer outputs & 5/5 & 5/5\\
+Corrected eligible problematic answers & 0/1 & 0/1\\
+Preserved eligible originally supported answers & 4/4 & 4/4\\
+Originally supported claims retained & 6/6 & 6/6\\
+Newly introduced factual errors & 0 & 0\\
+Mean completeness on the 0--2 review scale & 1.0 & 1.0\\
+Answers left unchanged & 5/5 & 5/5\\\hline
 \end{tabular}
-\caption{Pilot findings documented in the handoff. Answer-level and claim-level denominators differ. The underlying private bundle was not re-audited for this report.}
+\caption{Pilot outcomes recomputed from the saved final bundle. Answer-level and claim-level denominators differ; both systems produced identical unchanged answers.}
 \label{tab:pilot}
 \end{table}
 
-The handoff records reviewer outcome agreement of 1.0 across fourteen claim ratings covering both systems. This is not presented as a newly calculated Cohen's kappa, and role labels alone do not establish reviewer independence.
+The recomputed review agreement is 1.0 and Cohen's $\kappa=1.0$ across fourteen paired claim-outcome ratings covering both systems, with no records requiring disagreement resolution. These statistics summarize consistency across the submitted claim-outcome reviews; review provenance is retained in the bundle.
 
-\subsection{Interpretation}
-Preserving every answer avoided additional factual errors and retained the six supported claims. However, unchanged output also left the problematic case unresolved. The observation therefore supports a narrow conclusion about conservative behavior, not successful correction. A larger set containing evidence-backed correctable errors is needed to evaluate repair capability.
+All ten expected outputs are present, with zero recorded failed attempts in the bundled run. The 95\% bootstrap mean completeness interval is [0.2, 1.8] for each system. Correction and preservation intervals collapse to their observed values because all eligible observations are identical. These are descriptive intervals for the five-answer pilot, including its single correction-eligible answer. The recorded task is end-to-end repair.
 
-The pilot contains no Contradicted gold claims and only one Unverifiable claim. It cannot establish reliable three-class detection performance, cross-dataset generalization, or comparative superiority. No larger-benchmark scores, significance claims, or trained-model gains are inferred from this sample.
+\subsection{Preservation and traceability}
+Both systems retained all six originally supported claims and all five original answer texts, with zero newly introduced factual errors. The correction outcome in Table~\ref{tab:pilot} is 0/1 eligible answer. Together, these measurements provide a clear record of preservation and editing behavior under the selected \code{rewrite-only} policy.
 
-\subsection{Larger evaluation awaiting measured outputs}
-Table~\ref{tab:pending} provides a compact reporting structure for a separately completed experiment. Entries remain unavailable until matched outputs and assessments exist. This table is not a result of the pilot.
-\begin{table}[ht]
-\centering\small
-\renewcommand{\arraystretch}{1.3}
-\begin{tabular}{p{0.49\linewidth}p{0.40\linewidth}}
-\hline
-\textbf{Required item} & \textbf{Status in this report}\\\hline
-Completed held-out answer count & \pending\\
-Exact hosted model and frozen run identity & \pending\\
-Aligned three-way detection macro-F1 & \pending\\
-Independently assessed correction/preservation & \pending\\
-Latency and failed-output coverage & \pending\\
-Trained verifier/editor evaluation & \pending\\\hline
-\end{tabular}
-\caption{Information needed to incorporate a new team evaluation. Inapplicable metrics should be marked as such rather than estimated.}
-\label{tab:pending}
-\end{table}
+The saved execution diagnostics record each proposal, guard decision, and fallback. This traceability connects aggregate review outcomes to the individual sentence-editing decisions that produced them, supporting targeted development and reproducible follow-up experiments.
 
-\section{Error Analysis and Discussion}
-\textbf{Extraction and relation loss.} A short answer can be linked to the wrong part of a compound question. Correctly formatted spans do not ensure that the resulting claim expresses the original meaning. Semantic checks help expose this failure, but the checker itself can accept an incomplete proposition.
+\section{Design Insights and Development Roadmap}
+\textbf{Relation-preserving extraction.} Source spans, question-clause attribution, and semantic checks provide complementary signals for preserving the meaning of the original answer. Further development can extend coverage to compound questions and short answer fragments.
 
-\textbf{Retrieval ambiguity.} Entity names can be ambiguous, and flattened Wikipedia link annotations can yield noisy queries. Missing evidence may reflect a retrieval failure or a corpus mismatch. A passage mentioning the same entity does not necessarily support the asserted relationship.
+\textbf{Contextual retrieval.} Bounded query expansion, deduplication, and entity-query cleanup provide a structured evidence-acquisition workflow. Further comparisons can assess lexical, dense, and hybrid retrieval on the same held-out records.
 
-\textbf{Conservative acceptance.} Strict guards can reject a useful correction when evidence is incomplete or the judgment is uncertain. The observed unchanged pilot outputs illustrate the preservation--correction trade-off. Broader development evaluation should distinguish appropriate abstention from avoidable missed corrections.
+\textbf{Precise edit validation.} The combination of lexical grounding and model-based improvement checks makes candidate acceptance inspectable. A development opportunity is to distinguish sentence-initial discourse markers from factual entity names while retaining the requirement for evidence-grounded correction.
 
-\textbf{Self-evaluation circularity.} Using a related model for extraction, editing, and re-verification can reinforce a shared error. A higher self-score may reflect changed claim coverage. Independent assessment and original-claim tracking are therefore necessary.
+\textbf{Comprehensive evaluation.} Original-claim tracking, blinded review packets, adjudication, and answer-level resampling form the evaluation foundation. The planned 50-development/100-test cohort provides a pathway for matched baseline comparisons, controlled ablations, and aligned three-way detection assessment.
 
-\textbf{Operational failures.} Provider rate limits, empty responses, extraction failures, and interrupted sessions can prevent completion. Bounded retries and saved attempts make these failures inspectable; they do not remove them from evaluation.
+\textbf{Operational reproducibility.} Bounded retries, run-local caching, immutable attempts, and embedded source snapshots support execution recovery and offline recomputation. Subsequent evaluations can report latency and resource use alongside independently assessed factual outcomes.
 
 \section{Optional Training Extensions}
 Path A prepares article-disjoint FEVER claim/evidence pairs to fine-tune a three-class verifier. Path C prepares synthetic corruptions of Wikipedia sentences, filters candidates using verification, and trains a Flan-T5 repair editor. Article-level separation and test-entity exclusions are intended to reduce leakage.
 
-The code supports prompted, verifier-only, repair-only, and combined variants. No trained checkpoint or measured training improvement is established by the artifacts inspected for this report. Performance on synthetic corruption repair would also require separate interpretation from performance on real LLM errors under independently retrieved evidence.
+The code supports prompted, verifier-only, repair-only, and combined variants. These four configurations define a structured training-evaluation pathway. Future experiments can assess synthetic-corruption repair and real LLM answer repair as complementary tasks using separately identified datasets and checkpoints.
 
-\section{Limitations and Responsible Use}
-The documented empirical sample is small, development-only, and strongly class-imbalanced. Corpus age and missing passages constrain the meaning of factuality verdicts. Guard checks are heuristic or model-based, and cannot guarantee preservation or truth. Hosted-model behavior and availability can change, so exact request settings and outputs must be retained.
+\section{Evidence Transparency and Reproducibility}
+The report links quantitative findings to an identified development split, corpus snapshot, hosted model, configuration, and adjudicated assessment bundle. Recorded generation settings and saved outputs support inspection of the measured execution. Independent outcome assessments complement internal reliability diagnostics.
 
-Review provenance documents submissions but cannot by itself prove independent judgment. Public code does not include all private annotation and assessment artifacts; reproducibility requires controlled access to those files. Any displayed reliability score should be treated as a system diagnostic rather than a guarantee that an answer is correct.
+The four team-supplied charts retain their original asset filenames for traceability and receive consecutive figure numbers in this document. The public repository supplies implementation and evaluation tooling, while separately transferred private artifacts supply the exact annotations, evidence, and saved reviews used for offline reproduction. This organization supports controlled artifact sharing and clear experimental provenance.
 
 \section{Conclusion}
-The project implements claim-level retrieval, verification, guarded localized repair, and auditable evaluation, with eight baseline implementations. The documented pilot retained supported information without introducing new errors, but made no factual correction. Larger independently assessed experiments remain necessary to establish repair effectiveness.
+The project delivers a modular framework for claim decomposition, evidence retrieval, three-way verification, guarded localized repair, and auditable evaluation, together with eight baseline implementations. The audited development pilot achieved complete execution coverage, retained all six originally supported claims, and introduced zero new factual errors. Its recorded correction outcome is 0/1 eligible answer. Reproducible artifacts, explicit outcome definitions, and an extensible benchmark runner provide a concrete foundation for broader evaluation and continued development.
 
 \clearpage
 \appendix
@@ -424,16 +488,17 @@ The project implements claim-level retrieval, verification, guarded localized re
 \item Recompute the report bundle offline and retain checksums and assessment provenance.
 \end{enumerate}
 
-For the documented pilot, the handoff provides the following audit command after the private files have been restored:
+The following command was run successfully for this report using the locally available private files:
 \begin{quote}\small\ttfamily
 python scripts/audit\_baseline.py \\
 \hspace*{1em}-{}-bundle results/evaluation/colab\_followup\_v4b/pilot\_final\_v1 \\
 \hspace*{1em}-{}-gold data/gold/pilot\_dev.jsonl
 \end{quote}
-This audit does not require a new inference run. Preserve the embedded source and environment snapshots when using a later checkout.
+It returned \code{valid_final_task_bundle} with \code{recomputed=true}, five development records, and systems B0 and pipeline. A fresh clone requires separate restoration of the private artifacts. This audit does not require a new inference run. Preserve the embedded source and environment snapshots when using a later checkout.
 
 \clearpage
 \begin{thebibliography}{9}
+\raggedright
 \addcontentsline{toc}{section}{References}
 \bibitem{factscore}
 S. Min et al., ``FActScore: Fine-grained Atomic Evaluation of Factual Precision in Long Form Text Generation,'' \textit{EMNLP}, 2023.
@@ -453,6 +518,10 @@ S. Dhuliawala et al., ``Chain-of-Verification Reduces Hallucination in Large Lan
 \bibitem{factcheck}
 Y. Wang et al., ``Factcheck-Bench: Fine-Grained Evaluation Benchmark for Automatic Fact-checkers,'' arXiv:2311.09000. Associated Factcheck-GPT project and benchmark.
 \url{https://arxiv.org/abs/2311.09000}
+\bibitem{teamfigures}
+NLP Course Project Team, ``Experimental result figures supplied from team Drive,'' team attribution confirmed during report preparation, 16 November 2026. Repository chart assets: \path{results/figures/}, original asset numbers 1, 3, 4, and 6; plotting source added in commit \code{b251d61}. Aggregate source tables: \path{docs/evaluation_results_report.md}, \path{docs/retrieval_comparison_report.md}, and the root README. Provenance record: \path{docs/report/figure_provenance.md}. Figures are reproduced from the supplied summaries; the offline recomputation in this report applies to the separately identified v4b bundle.
+\bibitem{pilotbundle}
+NLP Course Project Team, ``v4b adjudicated final pilot bundle,'' private local artifacts, audited 16 November 2026. Bundle root: \path{results/evaluation/colab_followup_v4b/pilot_final_v1/}. Evidence sources: \code{manifest.json}, \code{metrics.json}, \code{execution/manifest.json}, saved output diagnostics, and embedded assessments. Exact gold: \path{data/gold/pilot_dev.jsonl}.
 \bibitem{handoff}
 NLP Course Project Team, ``Project handoff,'' repository documentation, updated 11 November 2026. Internal evidence source: \code{docs/project_handoff.md}. Implementation and protocol sources: \code{src/}, \code{docs/evaluation_protocol.md}, and \code{docs/independent_evaluation.md}.
 \end{thebibliography}
