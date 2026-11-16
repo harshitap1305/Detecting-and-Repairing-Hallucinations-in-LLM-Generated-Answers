@@ -5,8 +5,6 @@ Wikipedia evidence and attempts targeted corrections while preserving supported
 content. Given a question and an answer, the system produces a repaired answer,
 claim-level verdicts, retrieved evidence, and diagnostics for each processing stage.
 
-[Project report](docs/FINAL_PROJECT_REPORT.md) ·
-[Colab demo](notebooks/07_run_fast_cloud_demo_colab.ipynb)
 
 ## How it works
 
