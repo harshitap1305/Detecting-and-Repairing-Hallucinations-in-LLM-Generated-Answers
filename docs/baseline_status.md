@@ -4,8 +4,8 @@
 
 As checked on 7 November 2026, this checkout contains the prompted pipeline code and
 unit tests, but not the minimum experiment artifacts needed to reproduce the
-numerical claims in `docs/evaluation_results_report.md` or
-`docs/final_report_template.md`. **Those reported metrics are unverified from the
+numerical claims in `docs/evaluation_results_report.md`.
+**Those reported metrics are unverified from the
 tracked repository artifacts.** This does not establish that an experiment was
 never run; its inputs and outputs may be stored elsewhere.
 
