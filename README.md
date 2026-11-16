@@ -2,8 +2,6 @@
 
 > **NLP Course Project** — claim-level hallucination detection and evidence-grounded repair.
 
-## Current status
-
 The project implements claim decomposition, contextual retrieval, three-way
 verification, guarded localized repair, eight baseline systems (B0–B7), and a
 reproducible execution/review/reporting workflow. Entity Planner v3 is installed;
