@@ -1,7 +1,7 @@
 # Project handoff
 
 Updated 11 November 2026. This is the current status and entry point for the
-handoff. Older plans and Colab guides retain their historical context.
+handoff. Superseded plans and Colab guides are available in Git history.
 
 ## Delivered and measured
 
@@ -128,8 +128,7 @@ drafts remain separate and are not human submissions.
 - [Benchmark runner](benchmark_runner.md): execution and resume contract.
 - [Independent evaluation](independent_evaluation.md): review and scoring commands.
 - [Evaluation bundles](evaluation_bundles.md): final/progress reports and auditing.
-- Root design/training proposals and general Colab advice: historical background;
-  use this handoff and the specific workflow guides for current status.
+- [Current Colab guide](colab_followup_v4b.md): execution and artifact handling.
 
 ## Final cleanup checks
 

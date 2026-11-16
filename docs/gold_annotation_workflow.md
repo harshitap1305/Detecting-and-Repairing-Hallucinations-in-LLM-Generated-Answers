@@ -108,3 +108,39 @@ through source labels or references. Review and freeze the shared claim inventor
 before issuing it to independent annotators. Prepared packets are not gold and
 will fail the final validator until human claims, verdicts, citations, and repairs
 are supplied.
+
+
+## Pinned HaluEval source preparation
+
+The source-preparation workflow uses the official RUCAIBox/HaluEval QA data.
+The recorded raw QA SHA-256 is
+`89ed139ec5e3a3169a0b30e45569ac1283846f76f27f7bb5e908ee6deed57e88`.
+Preparation uses seed 42 and selects 50 development and 100 test candidates.
+Upstream reference/hallucinated answer origins are provenance, not human
+claim-level labels. Source context and reference answers remain separate from
+prediction inputs.
+
+Clone the official repository, detach at commit `b7253db3cdaa0ab2c382f92b26b390109174f77e`, and ensure
+`README.md`, `LICENSE`, and `data/qa_data.json` are checked out. The converter
+only reads a local checkout; it verifies commit/content identity and never
+fetches data or guesses a substitute revision.
+
+```bash
+python3 scripts/prepare_halueval_source.py \
+  --source-repo /path/to/HaluEval \
+  --revision b7253db3cdaa0ab2c382f92b26b390109174f77e \
+  --output-dir data/processed/halueval_v1
+
+python3 scripts/prepare_annotation_batch.py \
+  --config configs/evaluation_halueval_v1.yaml \
+  --output-dir data/annotation_batches/halueval_v1
+
+python3 scripts/export_annotation_sentences.py \
+  --batch-dir data/annotation_batches/halueval_v1 \
+  --output-dir data/annotation_batches/halueval_v1_sentence_reference
+```
+
+Use the prepared environment for the sentence export. These commands refuse
+existing output directories; choose a new version instead of overwriting human
+work. Upstream source context and answer origins remain in private provenance,
+not in model inputs or human verdict fields.

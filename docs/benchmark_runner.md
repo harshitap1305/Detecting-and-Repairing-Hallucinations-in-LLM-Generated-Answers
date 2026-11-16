@@ -326,7 +326,7 @@ returns nonzero for incomplete execution and still attempts a small backup ZIP.
 `<run_name>_products/latest.json` locates the newest product revision. Reprocessing
 an identical revision preserves its packet; an updated execution creates a new
 revision and retains old partial diagnostics. Source snapshots and previous run
-artifacts are preserved. See [the existing-runtime v4 instructions](colab_followup_v4.md)
+artifacts are preserved. See [the current v4b instructions](colab_followup_v4b.md)
 for the two Colab cells and the distinction between progress and final evaluation.
 
 

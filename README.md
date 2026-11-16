@@ -317,12 +317,12 @@ saved executions and independent assessments for offline recomputation. Use
 reports require complete adjudicated reviews; progress reports show coverage
 without final performance claims. Historical tables remain unverified.
 
-[Real HaluEval preparation](docs/halueval_experiment_handoff.md) produced a
+[Real HaluEval preparation](docs/gold_annotation_workflow.md#pinned-halueval-source-preparation) produced a
 50-development/100-test candidate cohort. Five development records have reviewed
 gold, completed live executions and adjudicated repair assessments. The remaining
 annotations and full benchmark are unfinished. See the
 [handoff](docs/project_handoff.md) for exact measured-artifact locations.
 
-For the reviewed five-record pilot, follow [the Colab instructions](docs/colab_reviewed_pilot.md)
+For the reviewed five-record pilot, follow [the Colab instructions](docs/colab_followup_v4b.md)
 and open `notebooks/05_run_reviewed_pilot_colab.ipynb`. Reviewed evidence passages
 include inline citation URLs; private gold is uploaded separately from the code.
