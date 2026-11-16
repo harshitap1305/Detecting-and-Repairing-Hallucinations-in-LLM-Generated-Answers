@@ -45,3 +45,5 @@ data/review_batches/
 
 # Human-reviewed gold annotations and review provenance remain private
 data/gold/
+!data/gold/demo_dev.jsonl
+!data/gold/demo_test.jsonl
