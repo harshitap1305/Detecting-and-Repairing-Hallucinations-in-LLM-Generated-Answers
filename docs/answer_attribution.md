@@ -66,8 +66,7 @@ to a validated relationship. Empty answers have explicit `empty_answer` status.
 spans, a plausible relation string, or the generator's own `bound` label do not
 establish that the answer actually expresses that fact. A compound-question
 fragment can have valid coordinates while still being bound to the wrong clause.
-The separate semantic extraction checker and pipeline gate from phases 3 and 4
-of `docs/v3_followup_implementation_plan.md` are now implemented. They do not
+The separate semantic extraction checker and pipeline gate are now implemented. They do not
 change the structural contract's meaning; their results are separate diagnostics.
 Direct `decompose()` calls retain `extraction_check="structural"` for compatibility.
 Pipeline/runner defaults explicitly select `semantic_v1` and require full proposed

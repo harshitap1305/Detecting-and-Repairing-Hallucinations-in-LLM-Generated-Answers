@@ -128,7 +128,6 @@ drafts remain separate and are not human submissions.
 - [Benchmark runner](benchmark_runner.md): execution and resume contract.
 - [Independent evaluation](independent_evaluation.md): review and scoring commands.
 - [Evaluation bundles](evaluation_bundles.md): final/progress reports and auditing.
-- [Reproducible evaluation plan](reproducible_evaluation_plan.md): delivered scope.
 - Root design/training proposals and general Colab advice: historical background;
   use this handoff and the specific workflow guides for current status.
 
